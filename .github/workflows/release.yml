@@ -1,0 +1,40 @@
+name: "Upgrade contracts"
+
+env:
+  RPC_URL: ${{ secrets.RPC_URL }}
+  BASE_SCAN_API_KEY: ${{ secrets.BASE_SCAN_API_KEY }}
+  GNOSIS_SIGNER_PRIVATE_KEY: ${{ secrets.GNOSIS_SIGNER_PRIVATE_KEY }}
+  MULTI_SIG_ADDRESS: ${{ vars.MULTI_SIG_ADDRESS }}
+  EXCHANGE_PROXY: ${{ vars.EXCHANGE_PROXY }}
+  CLEARING_SERVICE_PROXY: ${{ vars.CLEARING_SERVICE_PROXY }}
+  ORDER_BOOK_PROXY: ${{ vars.ORDER_BOOK_PROXY }}
+  PERP_PROXY: ${{ vars.PERP_PROXY }}
+  SPOT_PROXY: ${{ vars.SPOT_PROXY }}
+  DISABLE_UPGRADE_EXCHANGE_PROXY: ${{ vars.DISABLE_UPGRADE_EXCHANGE_PROXY }}
+  DISABLE_UPGRADE_CLEARING_SERVICE_PROXY: ${{ vars.DISABLE_UPGRADE_CLEARING_SERVICE_PROXY }}
+  DISABLE_UPGRADE_ORDER_BOOK_PROXY: ${{ vars.DISABLE_UPGRADE_ORDER_BOOK_PROXY }}
+  DISABLE_UPGRADE_PERP_PROXY: ${{ vars.DISABLE_UPGRADE_PERP_PROXY }}
+  DISABLE_UPGRADE_SPOT_PROXY: ${{ vars.DISABLE_UPGRADE_SPOT_PROXY }}
+
+on:
+  push:
+    branches:
+      - "release/mainnet"
+
+jobs:
+  upgrade-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.*"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Upgrade contracts
+        run: npm run upgrade-contracts
