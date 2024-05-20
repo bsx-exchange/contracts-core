@@ -1,33 +1,15 @@
 {
-  "extends": "solhint:default",
+  "extends": "solhint:recommended",
   "rules": {
-    "no-unused-vars": "warn",
-    "reentrancy": "error",
-    "not-rely-on-block-hash": "error",
-    "const-name-snakecase": "warn",
-    "avoid-call-value": "error",
-    "avoid-sha3": "error",
-    "not-rely-on-time": "warn",
-    "no-inline-assembly": "error",
-    "no-complex-fallback": "error",
-    "compiler-version": [
-      "error",
-      "^0.8.20"
-    ],
-    "check-send-result": "error",
-    "avoid-low-level-calls": "error",
-    "func-name-mixedcase": "warn",
-    "custom-errors": "warn",
-    "explicit-types": "warn",
-    "var-name-mixedcase": "warn",
-    "use-forbidden-name": "warn",
-    "event-name-camelcase": "warn",
-    "contract-name-camelcase": "warn",
-    "immutable-vars-naming": "warn",
-    "payable-fallback": "warn",
-    "no-unused-imports": "warn",
-    "no-empty-blocks": "warn",
-    "one-contract-per-file": "warn",
-    "func-param-name-mixedcase": "warn"
+    "code-complexity": ["warn", 8],
+    "compiler-version": ["error", ">=0.8.23"],
+    "func-name-mixedcase": "off",
+    "func-visibility": ["error", { "ignoreConstructors": true }],
+    "max-line-length": ["error", 124],
+    "state-visibility": "error",
+    "named-parameters-mapping": "warn",
+    "no-console": "warn",
+    "not-rely-on-time": "off",
+    "one-contract-per-file": "off"
   }
 }

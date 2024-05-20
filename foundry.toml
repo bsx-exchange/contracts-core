@@ -1,0 +1,53 @@
+# Full reference https://github.com/foundry-rs/foundry/tree/master/crates/config
+
+[profile.default]
+auto_detect_solc = false
+block_timestamp = 1_680_220_800 # March 31, 2023 at 00:00 GMT
+bytecode_hash = "none"
+evm_version = "cancun" # See https://www.evmdiff.com/features?name=PUSH0&kind=opcode
+fuzz = { runs = 1_000 }
+gas_reports = [
+  "Access",
+  "Exchange",
+  "Orderbook",
+  "Clearinghouse",
+  "PerpEngine",
+  "SpotEngine",
+]
+optimizer = true
+optimizer_runs = 1_000
+out = "out"
+script = "script"
+solc = "0.8.25"
+src = "src"
+test = "test"
+ffi = true
+via_ir = true
+fs_permissions = [{ access = "read", path = "." }]
+
+
+[profile.ci]
+fuzz = { runs = 10_000 }
+verbosity = 4
+
+[etherscan]
+base = { key = "${API_KEY_BASESCAN}" }
+base_sepolia = { key = "${API_KEY_BASESCAN}" }
+optimism_sepolia = { key = "${API_KEY_OPTIMISTIC_ETHERSCAN}" }
+
+[fmt]
+bracket_spacing = false
+int_types = "long"
+line_length = 120
+multiline_func_header = "params_first"
+number_underscore = "thousands"
+quote_style = "double"
+sort_imports = true
+tab_width = 4
+wrap_comments = true
+
+[rpc_endpoints]
+base = "https://mainnet.base.org"
+base_sepolia = "https://base-sepolia.g.alchemy.com/v2/${API_KEY_ALCHEMY}"
+optimism_sepolia = "https://optimism-sepolia.infura.io/v3/${API_KEY_INFURA}"
+localhost = "http://localhost:8545"
