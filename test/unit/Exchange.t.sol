@@ -20,6 +20,9 @@ import {Math} from "src/libraries/Math.sol";
 import {OperationType, OrderSide} from "src/types/DataTypes.sol";
 
 library Helper {
+    /// @dev add this to be excluded from coverage report
+    function test() public {}
+
     function toArray(bytes memory data) internal pure returns (bytes[] memory) {
         bytes[] memory array = new bytes[](1);
         array[0] = data;

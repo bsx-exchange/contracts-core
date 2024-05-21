@@ -16,6 +16,9 @@ contract ERC20MissingReturn {
 
     event Approval(address indexed owner, address indexed spender, uint256 amount);
 
+    /// @dev add this to be excluded from coverage report
+    function test() public {}
+
     function approve(address spender, uint256 value) public returns (bool) {
         _approve(msg.sender, spender, value);
         return true;

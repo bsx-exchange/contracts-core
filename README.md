@@ -1,6 +1,7 @@
 # BSX Exchange contracts
 
-[![CI](https://github.com/bsx-engineering/contracts-core/actions/workflows/ci.yml/badge.svg)](https://github.com/bsx-exchange/contracts-core/actions/workflows/ci.yml)
+[![CI](https://github.com/bsx-exchange/contracts-core/actions/workflows/ci.yml/badge.svg)](https://github.com/bsx-exchange/contracts-core/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/bsx-exchange/contracts-core/graph/badge.svg?token=ACNT7WX68X)](https://codecov.io/gh/bsx-exchange/contracts-core)
 [![npm version](https://img.shields.io/npm/v/@bsx-exchange/client/latest.svg)](https://www.npmjs.com/package/@bsx-exchange/client/v/latest)
 
 This repository contains the core smart contracts for BSX Exchange.
