@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity >=0.8.25 <0.9.0;
 
 /// @notice An implementation of ERC-20 that does not return a boolean in {transfer} and {transferFrom}.
@@ -16,8 +16,10 @@ contract ERC20MissingReturn {
 
     event Approval(address indexed owner, address indexed spender, uint256 amount);
 
-    /// @dev add this to be excluded from coverage report
-    function test() public {}
+    /// @dev add this to exclude from the coverage report
+    function test() public pure returns (bool) {
+        return true;
+    }
 
     function approve(address spender, uint256 value) public returns (bool) {
         _approve(msg.sender, spender, value);
