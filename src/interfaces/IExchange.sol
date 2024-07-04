@@ -13,6 +13,9 @@ interface IExchange {
     event SupportedTokenRemoved(address indexed token);
 
     /// @dev Emitted when an account authorizes a wallet to sign on its behalf
+    event RegisterSigningWallet(address indexed account, address indexed signer, uint64 nonce);
+
+    /// @dev Emitted when an account authorizes a wallet to sign on its behalf
     event SigningWallet(address indexed sender, address indexed signer, uint32 indexed transactionId);
 
     /// @dev Emitted when a user deposits tokens to the exchange
@@ -24,35 +27,42 @@ interface IExchange {
 
     /// @dev Emitted when a user withdraws tokens from the exchange.
     /// @param token Token address
-    /// @param account  account address
-    /// @param withdrawAmount Withdraw amount (in 18 decimals)
+    /// @param user  Account address
+    /// @param amount Withdraw amount (in 18 decimals)
     /// @param balance Balance of account after withdraw (in 18 decimals)
     /// @param nonce Nonce of the withdrawal
     /// @param withdrawalSequencerFee Sequencer fee of the withdrawal (in 18 decimals)
     event WithdrawInfo(
         address indexed token,
-        address indexed account,
-        uint256 withdrawAmount,
+        address indexed user,
+        uint256 amount,
         uint256 balance,
         uint64 nonce,
         uint256 withdrawalSequencerFee
     );
 
     /// @dev Emitted when a user is rejected to withdraw tokens from the exchange
-    /// @param account  account address
+    /// @param sender Account address
     /// @param nonce Nonce of the withdrawal
     /// @param withdrawAmount Withdraw amount (in 18 decimals)
-    /// @param balance Balance of account after withdraw (in 18 decimals)
-    event WithdrawRejected(address account, uint64 nonce, uint128 withdrawAmount, int256 balance);
+    /// @param spotBalance Balance of account after withdraw (in 18 decimals)
+    event WithdrawRejected(address sender, uint64 nonce, uint128 withdrawAmount, int256 spotBalance);
 
-    /// @dev Emitted when the insurance fund is deposited.
-    /// @param token Token addresss
-    /// @param amount Amount of token
-    event DepositInsurance(address indexed token, uint256 amount);
+    /// @dev Emitted when referral rebate is paid
+    /// @param referrer Referrer address
+    /// @param amount Rebate amount
+    event RebateReferrer(address indexed referrer, uint256 amount);
+
+    /// @dev Emitted when maker is rebated
+    /// @param maker Maker address
+    /// @param amount Rebate amount
+    event RebateMaker(address indexed maker, uint256 amount);
 
     /// @dev Emitted when the funding rate is updated.
     /// @param productIndex Product id
     /// @param diffPrice Premium funding rate
+    /// @param cummulativeFundingRate Cumulative funding rate
+    /// @param transactionId Transaction id
     event FundingRate(
         uint8 indexed productIndex,
         int256 indexed diffPrice,
@@ -60,8 +70,16 @@ interface IExchange {
         uint32 transactionId
     );
 
+    /// @dev Emitted when the insurance fund is deposited.
+    /// @param depositAmount Deposit amount (in 18 decimals)
+    /// @param insuranceFund Insurance fund after deposit (in 18 decimals)
+    event DepositInsuranceFund(uint256 depositAmount, uint256 insuranceFund);
+
     /// @dev Emitted when the insurance fund is withdrawn.
-    event WithdrawInsurance(address indexed token, uint256 amount);
+    /// @param withdrawAmount Withdraw amount (in 18 decimals)
+    /// @param insuranceFund Insurance fund after withdraw (in 18 decimals)
+    event WithdrawInsuranceFund(uint256 withdrawAmount, uint256 insuranceFund);
+
     event ClaimTradingFees(address indexed claimer, uint256 amount);
     event ClaimSequencerFees(address indexed claimer, uint256 amount);
 
@@ -114,13 +132,6 @@ interface IExchange {
         uint128 lastFundingRateUpdateSequenceNumber;
     }
 
-    /// @dev This struct is used for submit transaction of cover loss by insurance fund.
-    struct CoverLossByInsuranceFund {
-        address account;
-        address token;
-        uint256 amount;
-    }
-
     /// @notice decprecated
     struct WithdrawalInfo {
         address token;
@@ -147,15 +158,20 @@ interface IExchange {
     /// @dev Emits a {Deposit} event
     /// @param tokenAddress Token address
     /// @param amount Scaled amount of token, 18 decimals
-    /// emits a {Deposit} event.
     function deposit(address tokenAddress, uint128 amount) external;
+
+    /// @notice Deposits token with recipient with scaled amount to the exchange
+    /// @dev Emits a {Deposit} event
+    /// @param recipient Recipient address
+    /// @param tokenAddress Token address
+    /// @param amount Scaled amount of token, 18 decimals
+    function deposit(address recipient, address tokenAddress, uint128 amount) external;
 
     /// @notice Deposits token with raw amount to the exchange
     /// @dev Emits a {Deposit} event
     /// @param recipient Recipient address
     /// @param token Token address
     /// @param rawAmount Raw amount of token (in token decimals)
-    /// emits a {Deposit} event.
     function depositRaw(address recipient, address token, uint128 rawAmount) external;
 
     /// @notice Deposits token to the exchange with authorization, following EIP-3009
@@ -167,7 +183,6 @@ interface IExchange {
     /// @param validBefore   The time before which this is valid (unix time)
     /// @param nonce         Unique nonce
     /// @param signature     Signature bytes signed by an EOA wallet or a contract wallet
-    /// emits a {Deposit} event.
     function depositWithAuthorization(
         address tokenAddress,
         address depositor,
@@ -182,13 +197,15 @@ interface IExchange {
     /// @param operations List of transactions
     function processBatch(bytes[] calldata operations) external;
 
-    /// @notice Deposits insurance fund to the exchange
+    /// @notice Deposits token to insurance fund
     /// @dev Emits a {DepositInsurance} event
-    function depositInsuranceFund(address token, uint256 amount) external;
+    /// @param amount Deposit amount (in 18 decimals)
+    function depositInsuranceFund(uint256 amount) external;
 
-    /// @notice Withdraws token from the exchange
+    /// @notice Withdraws token from insurance fund
     /// @dev Emits a {WithdrawInsurance} event
-    function withdrawInsuranceFund(address token, uint256 amount) external;
+    /// @param amount Withdraw amount (in 18 decimals)
+    function withdrawInsuranceFund(uint256 amount) external;
 
     /// @notice Claims collected the trading fees
     /// @dev Emits a {ClaimTradingFees} event

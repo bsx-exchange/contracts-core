@@ -4,8 +4,8 @@ pragma solidity ^0.8.23;
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
+import {Errors} from "../lib/Errors.sol";
 import {Role} from "../share/Enums.sol";
-import {INVALID_ADDRESS} from "../share/RevertReason.sol";
 
 /// @title Access contract
 /// @notice Manage access control
@@ -25,7 +25,7 @@ contract Access is Initializable, AccessControlUpgradeable {
 
     function initialize(address adminGeneral) public initializer {
         if (adminGeneral == address(0)) {
-            revert(INVALID_ADDRESS);
+            revert Errors.ZeroAddress();
         }
         _grantRole(ADMIN_GENERAL_ROLE, adminGeneral);
     }

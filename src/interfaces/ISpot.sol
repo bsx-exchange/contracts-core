@@ -4,6 +4,13 @@ pragma solidity >=0.8.23;
 /// @title Spot Engine interface
 /// @notice Manage token balances state
 interface ISpot {
+    /// @dev Emitted when an account balance is updated
+    /// @param account account address
+    /// @param token token address
+    /// @param delta amount of token to update
+    /// @param newBalance new balance of the account
+    event UpdateBalance(address indexed account, address token, int256 delta, int256 newBalance);
+
     /// @notice Stores collateral balance of an account
     struct Balance {
         int256 amount;

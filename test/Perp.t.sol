@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {IPerp, Perp} from "src/Perp.sol";
 import {Access} from "src/access/Access.sol";
-import {INVALID_ADDRESS, NOT_SEQUENCER} from "src/share/RevertReason.sol";
+import {Errors} from "src/lib/Errors.sol";
 
 contract PerpTest is Test {
     address private exchange = makeAddr("exchange");
@@ -32,7 +32,7 @@ contract PerpTest is Test {
 
     function test_initialize_revertsIfSetZeroAddr() public {
         Perp _perp = new Perp();
-        vm.expectRevert(bytes(INVALID_ADDRESS));
+        vm.expectRevert(Errors.ZeroAddress.selector);
         _perp.initialize(address(0));
     }
 
@@ -62,7 +62,7 @@ contract PerpTest is Test {
     }
 
     function test_updateFundingRate_revertsWhenUnauthorized() public {
-        vm.expectRevert(bytes(NOT_SEQUENCER));
+        vm.expectRevert(Errors.Unauthorized.selector);
         perpEngine.updateFundingRate(0, 0);
     }
 
@@ -82,7 +82,7 @@ contract PerpTest is Test {
 
     function test_modifyAccount_revertsWhenUnauthorized() public {
         IPerp.AccountDelta[] memory deltas = new IPerp.AccountDelta[](0);
-        vm.expectRevert(bytes(NOT_SEQUENCER));
+        vm.expectRevert(Errors.Unauthorized.selector);
         perpEngine.modifyAccount(deltas);
     }
 }

@@ -4,7 +4,7 @@ pragma solidity >=0.8.25 <0.9.0;
 import {Test} from "forge-std/Test.sol";
 
 import {Access} from "src/access/Access.sol";
-import {INVALID_ADDRESS} from "src/share/RevertReason.sol";
+import {Errors} from "src/lib/Errors.sol";
 
 contract AccessTest is Test {
     address private admin = makeAddr("admin");
@@ -22,7 +22,7 @@ contract AccessTest is Test {
 
     function test_initialize_revertsIfSetZeroAddr() public {
         Access _access = new Access();
-        vm.expectRevert(bytes(INVALID_ADDRESS));
+        vm.expectRevert(Errors.ZeroAddress.selector);
         _access.initialize(address(0));
     }
 

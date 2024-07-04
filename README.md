@@ -51,6 +51,7 @@ $ bun run test:coverage
 | [Orderbook](./src/OrderBook.sol)             | `0xE8A973AA7600c1Dba1e7936B95f67A14e6257137` |
 | [SpotEngine](./src/Spot.sol)                 | `0x519086cd28A7A38C9701C0c914588DB4040FFCaE` |
 | [PerpEngine](./src/Perp.sol)                 | `0xE2EB30975B8d063B38FDd77892F65138Bc802Bc7` |
+| [Access](./src/access/Access.sol)            | `0x6c3Bb56d77E4225EEcE45Cde491f4A1a1649B034` |
 
 ## License
 

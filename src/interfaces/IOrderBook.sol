@@ -28,6 +28,7 @@ interface IOrderBook {
         int128 maker;
         int128 taker;
         uint128 referralRebate;
+        uint128 liquidationPenalty;
     }
 
     /// @notice Event emitted when an order is matched

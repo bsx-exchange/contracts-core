@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {ISpot, Spot} from "src/Spot.sol";
 import {Access} from "src/access/Access.sol";
-import {INVALID_ADDRESS, NOT_SEQUENCER} from "src/share/RevertReason.sol";
+import {Errors} from "src/lib/Errors.sol";
 
 contract SpotEngineTest is Test {
     address private exchange = makeAddr("exchange");
@@ -32,7 +32,7 @@ contract SpotEngineTest is Test {
 
     function test_initialize_revertsIfSetZeroAddr() public {
         Spot _spotEngine = new Spot();
-        vm.expectRevert(bytes(INVALID_ADDRESS));
+        vm.expectRevert(Errors.ZeroAddress.selector);
         _spotEngine.initialize(address(0));
     }
 
@@ -67,12 +67,16 @@ contract SpotEngineTest is Test {
             int256 amount0 = 100;
             ISpot.AccountDelta memory delta0 = ISpot.AccountDelta({token: token, account: accounts[i], amount: amount0});
             deltas[0] = delta0;
+            vm.expectEmit(address(spotEngine));
+            emit ISpot.UpdateBalance(accounts[i], token, amount0, amount0);
             spotEngine.modifyAccount(deltas);
             assertEq(spotEngine.getBalance(token, accounts[i]), amount0);
 
             int256 amount1 = -300;
             ISpot.AccountDelta memory delta1 = ISpot.AccountDelta({token: token, account: accounts[i], amount: amount1});
             deltas[0] = delta1;
+            vm.expectEmit(address(spotEngine));
+            emit ISpot.UpdateBalance(accounts[i], token, amount1, amount0 + amount1);
             spotEngine.modifyAccount(deltas);
             assertEq(spotEngine.getBalance(token, accounts[i]), amount0 + amount1);
         }
@@ -80,7 +84,7 @@ contract SpotEngineTest is Test {
 
     function test_modifyAccount_revertsWhenUnauthorized() public {
         ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](0);
-        vm.expectRevert(bytes(NOT_SEQUENCER));
+        vm.expectRevert(Errors.Unauthorized.selector);
         spotEngine.modifyAccount(deltas);
     }
 
@@ -94,7 +98,7 @@ contract SpotEngineTest is Test {
 
     function test_setTotalBalance_increase_revertsWhenUnauthorized() public {
         address token = makeAddr("token");
-        vm.expectRevert(bytes(NOT_SEQUENCER));
+        vm.expectRevert(Errors.Unauthorized.selector);
         spotEngine.setTotalBalance(token, 100, true);
     }
 
@@ -111,7 +115,7 @@ contract SpotEngineTest is Test {
 
     function test_setTotalBalance_decrease_revertsWhenUnauthorized() public {
         address token = makeAddr("token");
-        vm.expectRevert(bytes(NOT_SEQUENCER));
+        vm.expectRevert(Errors.Unauthorized.selector);
         spotEngine.setTotalBalance(token, 100, false);
     }
 }

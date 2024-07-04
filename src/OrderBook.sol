@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {Access} from "./access/Access.sol";
@@ -8,26 +9,19 @@ import {IClearingService} from "./interfaces/IClearingService.sol";
 import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IPerp} from "./interfaces/IPerp.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
+import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
-import {MAX_MATCH_FEES, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
+import {Percentage} from "./lib/Percentage.sol";
+import {MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEES, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
-import {
-    DUPLICATE_ADDRESS,
-    INVALID_ADDRESS,
-    INVALID_FEES,
-    INVALID_MATCH_SIDE,
-    INVALID_SEQUENCER_FEES,
-    NONCE_USED,
-    NOT_SEQUENCER,
-    REQUIRE_ONE_LIQUIDATION_ORDER
-} from "./share/RevertReason.sol";
 
 /// @title Orderbook contract
 /// @notice This contract is used for matching orders
 /// @dev This contract is upgradeable
-contract OrderBook is Initializable, IOrderBook {
+contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
     using MathHelper for int128;
+    using Percentage for uint128;
 
     IClearingService public clearingService;
     ISpot public spotEngine;
@@ -54,7 +48,7 @@ contract OrderBook is Initializable, IOrderBook {
             _clearingService == address(0) || _spotEngine == address(0) || _perpEngine == address(0)
                 || _access == address(0) || _collateralToken == address(0)
         ) {
-            revert(INVALID_ADDRESS);
+            revert Errors.ZeroAddress();
         }
         clearingService = IClearingService(_clearingService);
         spotEngine = ISpot(_spotEngine);
@@ -65,7 +59,7 @@ contract OrderBook is Initializable, IOrderBook {
 
     function _onlySequencer() internal view {
         if (msg.sender != access.getExchange()) {
-            revert(NOT_SEQUENCER);
+            revert Errors.Unauthorized();
         }
     }
 
@@ -84,17 +78,14 @@ contract OrderBook is Initializable, IOrderBook {
         uint128 takerSequencerFee,
         Fee calldata matchFee
     ) external onlySequencer {
-        if (maker.isLiquidation && taker.isLiquidation) {
-            revert(REQUIRE_ONE_LIQUIDATION_ORDER);
-        }
         if (maker.order.orderSide == taker.order.orderSide) {
-            revert(INVALID_MATCH_SIDE);
+            revert Errors.Orderbook_OrdersWithSameSides();
         }
         if (maker.order.sender == taker.order.sender) {
-            revert(DUPLICATE_ADDRESS);
+            revert Errors.Orderbook_OrdersWithSameAccounts();
         }
-        if (0 > takerSequencerFee || takerSequencerFee > MAX_TAKER_SEQUENCER_FEE) {
-            revert(INVALID_SEQUENCER_FEES);
+        if (takerSequencerFee > MAX_TAKER_SEQUENCER_FEE) {
+            revert Errors.Orderbook_ExceededMaxSequencerFee();
         }
 
         uint128 fillAmount =
@@ -102,18 +93,17 @@ contract OrderBook is Initializable, IOrderBook {
         _verifyUsedNonce(maker.order.sender, maker.order.nonce);
         _verifyUsedNonce(taker.order.sender, taker.order.nonce);
 
+        _validatePrice(maker.order.orderSide, maker.order.price, taker.order.price);
+        uint128 price = maker.order.price;
+
         Delta memory takerDelta;
         Delta memory makerDelta;
-        uint128 price;
-
         if (taker.order.orderSide == OrderSide.SELL) {
-            price = MathHelper.max(maker.order.price, taker.order.price);
             takerDelta.productAmount = -int128(fillAmount);
             makerDelta.productAmount = int128(fillAmount);
             takerDelta.quoteAmount = int128(price).mul18D(int128(fillAmount));
             makerDelta.quoteAmount = -takerDelta.quoteAmount;
         } else {
-            price = maker.order.price;
             takerDelta.productAmount = int128(fillAmount);
             makerDelta.productAmount = -int128(fillAmount);
             makerDelta.quoteAmount = int128(price).mul18D(int128(fillAmount));
@@ -123,8 +113,22 @@ contract OrderBook is Initializable, IOrderBook {
             matchFee.maker > MathHelper.abs(makerDelta.quoteAmount.mul18D(MAX_MATCH_FEES))
                 || matchFee.taker > MathHelper.abs(takerDelta.quoteAmount.mul18D(MAX_MATCH_FEES))
         ) {
-            revert(INVALID_FEES);
+            revert Errors.Orderbook_ExceededMaxTradingFee();
         }
+
+        if (taker.isLiquidation) {
+            uint128 liquidationFee = matchFee.liquidationPenalty;
+            uint128 maxLiquidationFee =
+                uint128(MathHelper.abs(takerDelta.quoteAmount)).calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
+
+            if (liquidationFee > maxLiquidationFee) {
+                revert Errors.Orderbook_ExceededMaxLiquidationFee();
+            }
+
+            takerDelta.quoteAmount -= int128(liquidationFee);
+            clearingService.collectLiquidationFee(taker.order.sender, taker.order.nonce, liquidationFee);
+        }
+
         makerDelta.quoteAmount = makerDelta.quoteAmount - matchFee.maker;
         takerDelta.quoteAmount = takerDelta.quoteAmount - matchFee.taker;
         _updateFeeCollection(matchFee);
@@ -248,9 +252,18 @@ contract OrderBook is Initializable, IOrderBook {
         return (newQuote, newSize);
     }
 
+    function _validatePrice(OrderSide makerSide, uint128 makerPrice, uint128 takerPrice) internal pure {
+        if (makerSide == OrderSide.BUY && makerPrice < takerPrice) {
+            revert Errors.Orderbook_InvalidOrderPrice();
+        }
+        if (makerSide == OrderSide.SELL && makerPrice > takerPrice) {
+            revert Errors.Orderbook_InvalidOrderPrice();
+        }
+    }
+
     function _verifyUsedNonce(address user, uint64 nonce) internal view {
         if (isNonceUsed[user][nonce]) {
-            revert(NONCE_USED);
+            revert Errors.Orderbook_NonceUsed(user, nonce);
         }
     }
 

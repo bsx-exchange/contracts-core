@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {Access} from "./access/Access.sol";
 import {IPerp} from "./interfaces/IPerp.sol";
-import {INVALID_ADDRESS, NOT_SEQUENCER} from "./share/RevertReason.sol";
+import {Errors} from "./lib/Errors.sol";
 
 /// @title Perp contract
 /// @notice Manage openning positions
 /// @dev This contract is upgradeable
-contract Perp is IPerp, Initializable {
+contract Perp is IPerp, Initializable, OwnableUpgradeable {
     Access public access;
 
     mapping(address account => mapping(uint8 productId => Balance balance)) public balance;
@@ -18,7 +19,7 @@ contract Perp is IPerp, Initializable {
 
     function initialize(address _access) public initializer {
         if (_access == address(0)) {
-            revert(INVALID_ADDRESS);
+            revert Errors.ZeroAddress();
         }
         access = Access(_access);
     }
@@ -28,7 +29,7 @@ contract Perp is IPerp, Initializable {
             msg.sender != access.getExchange() && msg.sender != access.getClearingService()
                 && msg.sender != access.getOrderBook()
         ) {
-            revert(NOT_SEQUENCER);
+            revert Errors.Unauthorized();
         }
     }
 
@@ -92,5 +93,59 @@ contract Perp is IPerp, Initializable {
 
         _balance.lastFunding = _fundingRate.cumulativeFunding18D;
         _fundingRate.openInterest += (_balance.size > 0) ? _balance.size : int128(0);
+    }
+
+    /*//////////////////////////////////////////////////////////////////////////
+                                DEVELOPMENT ONLY
+    //////////////////////////////////////////////////////////////////////////*/
+    struct Market {
+        uint8 productIndex;
+        Balance balance;
+    }
+
+    struct UserAllMarketBalanceInfo {
+        address account;
+        Market[] markets;
+    }
+
+    function resetBalance(uint8[] memory productId, address account) external onlySequencer {
+        uint64 length = uint64(productId.length);
+        for (uint64 index = 0; index < length; ++index) {
+            uint8 productIndex = productId[index];
+            Balance memory _balance = balance[account][productIndex];
+            _balance.size = 0;
+            _balance.quoteBalance = 0;
+            _balance.lastFunding = 0;
+            balance[account][productIndex] = _balance;
+        }
+    }
+
+    function resetFundingRate(uint8[] memory productId) external onlySequencer {
+        uint64 length = uint64(productId.length);
+        for (uint64 index = 0; index < length; ++index) {
+            uint8 productIndex = productId[index];
+            FundingRate memory _fundingRate = fundingRate[productIndex];
+            _fundingRate.cumulativeFunding18D = 0;
+            _fundingRate.openInterest = 0;
+            fundingRate[productIndex] = _fundingRate;
+        }
+    }
+
+    function getAllUserMarketBalances(
+        address[] calldata _accounts,
+        uint8[] calldata _productIndexs
+    ) external view returns (UserAllMarketBalanceInfo[] memory) {
+        uint256 length = _accounts.length;
+        UserAllMarketBalanceInfo[] memory balances = new UserAllMarketBalanceInfo[](length);
+        for (uint256 index = 0; index < length; ++index) {
+            address account = _accounts[index];
+            Market[] memory balanceInfos = new Market[](_productIndexs.length);
+            for (uint256 balanceIndex = 0; balanceIndex < _productIndexs.length; balanceIndex++) {
+                uint8 productIndex = _productIndexs[balanceIndex];
+                balanceInfos[balanceIndex] = Market(productIndex, balance[account][productIndex]);
+            }
+            balances[index] = UserAllMarketBalanceInfo(account, balanceInfos);
+        }
+        return balances;
     }
 }
