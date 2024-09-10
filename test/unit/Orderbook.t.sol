@@ -4,17 +4,21 @@ pragma solidity >=0.8.25 <0.9.0;
 import {Test} from "forge-std/Test.sol";
 import {StdStorage, stdStorage} from "forge-std/Test.sol";
 
-import {ClearingService} from "src/ClearingService.sol";
-import {IOrderBook, OrderBook} from "src/OrderBook.sol";
-import {IPerp, Perp} from "src/Perp.sol";
-import {Spot} from "src/Spot.sol";
-import {Access} from "src/access/Access.sol";
-import {Errors} from "src/lib/Errors.sol";
-import {LibOrder} from "src/lib/LibOrder.sol";
-import {MathHelper} from "src/lib/MathHelper.sol";
-import {Percentage} from "src/lib/Percentage.sol";
-import {MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEES, MAX_TAKER_SEQUENCER_FEE} from "src/share/Constants.sol";
-import {OrderSide} from "src/share/Enums.sol";
+import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
+import {IPerp, Perp} from "contracts/exchange/Perp.sol";
+import {Spot} from "contracts/exchange/Spot.sol";
+import {Access} from "contracts/exchange/access/Access.sol";
+import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
+import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
+import {Percentage} from "contracts/exchange/lib/Percentage.sol";
+import {
+    MAX_LIQUIDATION_FEE_RATE,
+    MAX_MATCH_FEE_RATE,
+    MAX_TAKER_SEQUENCER_FEE
+} from "contracts/exchange/share/Constants.sol";
+import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 contract OrderbookTest is Test {
     using MathHelper for uint128;
@@ -40,6 +44,10 @@ contract OrderbookTest is Test {
     function setUp() public {
         access = new Access();
         access.initialize(address(this));
+
+        // migrate new admin role
+        access.migrateAdmin();
+
         access.setExchange(exchange);
 
         spotEngine = new Spot();
@@ -142,11 +150,11 @@ contract OrderbookTest is Test {
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
         assertEq(
-            abi.encode(perpEngine.getBalance(maker, productId)),
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
         );
         assertEq(
-            abi.encode(perpEngine.getBalance(taker, productId)),
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
         assertEq(spotEngine.getBalance(token, maker), 0);
@@ -192,11 +200,11 @@ contract OrderbookTest is Test {
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
         assertEq(
-            abi.encode(perpEngine.getBalance(maker, productId)),
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
             abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
         assertEq(
-            abi.encode(perpEngine.getBalance(taker, productId)),
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
         );
         assertEq(spotEngine.getBalance(token, maker), 0);
@@ -229,8 +237,8 @@ contract OrderbookTest is Test {
         (takerOrder, digest.taker) = _createLongOrder(taker, size, closePositionPrice, takerNonce + 1, isLiquidation);
         orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
 
-        assertEq(abi.encode(perpEngine.getBalance(maker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
-        assertEq(abi.encode(perpEngine.getBalance(taker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
+        assertEq(abi.encode(perpEngine.getOpenPosition(maker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
+        assertEq(abi.encode(perpEngine.getOpenPosition(taker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
 
         int128 pnl = int128(size).mul18D(int128(closePositionPrice - openPositionPrice));
         assertEq(spotEngine.getBalance(token, maker), pnl);
@@ -262,11 +270,11 @@ contract OrderbookTest is Test {
         int128 expectedBaseAmount = int128(openSize - closeSize);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
         assertEq(
-            abi.encode(perpEngine.getBalance(maker, productId)),
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
         );
         assertEq(
-            abi.encode(perpEngine.getBalance(taker, productId)),
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
 
@@ -299,11 +307,11 @@ contract OrderbookTest is Test {
         int128 expectedBaseAmount = int128(size1 - size0);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price1));
         assertEq(
-            abi.encode(perpEngine.getBalance(maker, productId)),
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
             abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
         assertEq(
-            abi.encode(perpEngine.getBalance(taker, productId)),
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
         );
 
@@ -333,11 +341,11 @@ contract OrderbookTest is Test {
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
         assertEq(
-            abi.encode(perpEngine.getBalance(maker, productId)),
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fee.maker, 0))
         );
         assertEq(
-            abi.encode(perpEngine.getBalance(taker, productId)),
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(
                 IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - fee.taker - int128(takerSequencerFee), 0)
             )
@@ -373,11 +381,11 @@ contract OrderbookTest is Test {
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
         uint128 liquidationFee = fee.liquidationPenalty;
         assertEq(
-            abi.encode(perpEngine.getBalance(maker, productId)),
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fee.maker, 0))
         );
         assertEq(
-            abi.encode(perpEngine.getBalance(taker, productId)),
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(
                 IPerp.Balance(
                     -expectedBaseAmount,
@@ -391,7 +399,7 @@ contract OrderbookTest is Test {
 
         assertEq(orderbook.getSequencerFees(), int128(takerSequencerFee));
         assertEq(orderbook.getTradingFees(), fee.maker + fee.taker - int128(fee.referralRebate));
-        assertEq(clearingService.getInsuranceFund(), liquidationFee);
+        assertEq(clearingService.getInsuranceFundBalance(), liquidationFee);
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
@@ -550,12 +558,12 @@ contract OrderbookTest is Test {
         int128 matchedQuoteAmount = int128(size).mul18D(int128(price));
         IOrderBook.Fee memory fee;
 
-        fee.maker = matchedQuoteAmount.mul18D(MAX_MATCH_FEES) + 1;
+        fee.maker = matchedQuoteAmount.mul18D(MAX_MATCH_FEE_RATE) + 1;
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
         orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
 
         fee.maker = 0;
-        fee.taker = matchedQuoteAmount.mul18D(MAX_MATCH_FEES) + 1;
+        fee.taker = matchedQuoteAmount.mul18D(MAX_MATCH_FEE_RATE) + 1;
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
         orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
     }

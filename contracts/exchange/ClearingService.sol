@@ -6,6 +6,7 @@ import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Ini
 
 import {Access} from "./access/Access.sol";
 import {IClearingService} from "./interfaces/IClearingService.sol";
+import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
 
@@ -14,7 +15,7 @@ import {Errors} from "./lib/Errors.sol";
 /// @dev This contract is upgradeable
 contract ClearingService is IClearingService, Initializable, OwnableUpgradeable {
     Access public access;
-    uint256 private insuranceFund18D;
+    uint256 private insuranceFundBalance;
 
     function initialize(address _access) public initializer {
         if (_access == address(0)) {
@@ -55,13 +56,13 @@ contract ClearingService is IClearingService, Initializable, OwnableUpgradeable 
         if (amount == 0) {
             revert Errors.ClearingService_ZeroAmount();
         }
-        insuranceFund18D += amount;
+        insuranceFundBalance += amount;
     }
 
     /// @inheritdoc IClearingService
     function collectLiquidationFee(address account, uint64 nonce, uint256 amount) external onlySequencer {
-        insuranceFund18D += amount;
-        emit CollectLiquidationFee(account, nonce, amount, insuranceFund18D);
+        insuranceFundBalance += amount;
+        emit CollectLiquidationFee(account, nonce, amount, insuranceFundBalance);
     }
 
     /// @inheritdoc IClearingService
@@ -69,32 +70,34 @@ contract ClearingService is IClearingService, Initializable, OwnableUpgradeable 
         if (amount == 0) {
             revert Errors.ClearingService_ZeroAmount();
         }
-        if (amount > insuranceFund18D) {
-            revert Errors.ClearingService_InsufficientFund(amount, insuranceFund18D);
+        if (amount > insuranceFundBalance) {
+            revert Errors.ClearingService_InsufficientFund(amount, insuranceFundBalance);
         }
-        insuranceFund18D -= amount;
+        insuranceFundBalance -= amount;
     }
 
     /// @inheritdoc IClearingService
-    function coverLossWithInsuranceFund(ISpot spotEngine, address token, address account) external onlySequencer {
-        int256 balance = spotEngine.getBalance(token, account);
+    function coverLossWithInsuranceFund(address account, uint256 amount) external onlySequencer {
+        IOrderBook orderBook = IOrderBook(access.getOrderBook());
+        ISpot spotEngine = ISpot(access.getSpotEngine());
+
+        address collateralToken = orderBook.getCollateralToken();
+        int256 balance = spotEngine.getBalance(collateralToken, account);
         if (balance >= 0) {
             revert Errors.ClearingService_NoLoss(account, balance);
         }
 
-        uint256 loss = uint256(-balance);
-        if (loss > insuranceFund18D) {
-            revert Errors.ClearingService_InsufficientFund(loss, insuranceFund18D);
+        if (amount > insuranceFundBalance) {
+            revert Errors.ClearingService_InsufficientFund(amount, insuranceFundBalance);
         }
-        insuranceFund18D -= loss;
+        insuranceFundBalance -= amount;
 
         ISpot.AccountDelta[] memory productDelta = new ISpot.AccountDelta[](1);
-        productDelta[0] = ISpot.AccountDelta(token, account, int256(loss));
+        productDelta[0] = ISpot.AccountDelta(collateralToken, account, int256(amount));
         spotEngine.modifyAccount(productDelta);
     }
 
-    /// @inheritdoc IClearingService
-    function getInsuranceFund() external view returns (uint256) {
-        return insuranceFund18D;
+    function getInsuranceFundBalance() external view returns (uint256) {
+        return insuranceFundBalance;
     }
 }

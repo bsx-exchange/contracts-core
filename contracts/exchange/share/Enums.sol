@@ -6,11 +6,6 @@ enum Role {
     ADMIN_TRADING
 }
 
-enum EngineType {
-    SPOT,
-    PERP
-}
-
 enum OrderSide {
     BUY,
     SELL

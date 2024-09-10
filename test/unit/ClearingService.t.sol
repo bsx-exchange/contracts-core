@@ -3,10 +3,11 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {Test} from "forge-std/Test.sol";
 
-import {ClearingService, IClearingService} from "src/ClearingService.sol";
-import {ISpot, Spot} from "src/Spot.sol";
-import {Access} from "src/access/Access.sol";
-import {Errors} from "src/lib/Errors.sol";
+import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
+import {OrderBook} from "contracts/exchange/OrderBook.sol";
+import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Access} from "contracts/exchange/access/Access.sol";
+import {Errors} from "contracts/exchange/lib/Errors.sol";
 
 contract ClearingServiceTest is Test {
     address private exchange = makeAddr("exchange");
@@ -14,19 +15,29 @@ contract ClearingServiceTest is Test {
     address private token = makeAddr("token");
 
     Access private access;
+    OrderBook private orderbook;
     Spot private spotEngine;
     ClearingService private clearingService;
 
     function setUp() public {
         access = new Access();
         access.initialize(address(this));
+
+        // migrate new admin role
+        access.migrateAdmin();
+
         access.setExchange(exchange);
 
         spotEngine = new Spot();
         spotEngine.initialize(address(access));
+        access.setSpotEngine(address(spotEngine));
 
         clearingService = new ClearingService();
         clearingService.initialize(address(access));
+
+        orderbook = new OrderBook();
+        orderbook.initialize(address(clearingService), address(spotEngine), makeAddr("perp"), address(access), token);
+        access.setOrderBook(address(orderbook));
 
         access.setClearingService(address(clearingService));
     }
@@ -77,7 +88,7 @@ contract ClearingServiceTest is Test {
 
         uint256 amount = 100;
         clearingService.depositInsuranceFund(amount);
-        assertEq(clearingService.getInsuranceFund(), amount);
+        assertEq(clearingService.getInsuranceFundBalance(), amount);
     }
 
     function test_depositInsuranceFund_revertsIfZeroAmount() public {
@@ -97,10 +108,10 @@ contract ClearingServiceTest is Test {
 
         uint256 amount = 100;
         clearingService.depositInsuranceFund(amount);
-        assertEq(clearingService.getInsuranceFund(), amount);
+        assertEq(clearingService.getInsuranceFundBalance(), amount);
 
         clearingService.withdrawInsuranceFundEmergency(amount);
-        assertEq(clearingService.getInsuranceFund(), 0);
+        assertEq(clearingService.getInsuranceFundBalance(), 0);
     }
 
     function test_withdrawInsuranceFundEmergency_revertsIfZeroAmount() public {
@@ -120,7 +131,7 @@ contract ClearingServiceTest is Test {
 
         uint256 amount = 100;
         clearingService.depositInsuranceFund(amount);
-        assertEq(clearingService.getInsuranceFund(), amount);
+        assertEq(clearingService.getInsuranceFundBalance(), amount);
 
         uint256 withdrawAmount = amount + 1;
         vm.expectRevert(
@@ -137,7 +148,7 @@ contract ClearingServiceTest is Test {
         vm.expectEmit();
         emit IClearingService.CollectLiquidationFee(account, nonce, amount, amount);
         clearingService.collectLiquidationFee(account, nonce, amount);
-        assertEq(clearingService.getInsuranceFund(), amount);
+        assertEq(clearingService.getInsuranceFundBalance(), amount);
     }
 
     function test_collectLiquidationFee_revertsWhenUnauthorized() public {
@@ -159,14 +170,14 @@ contract ClearingServiceTest is Test {
         deltas[0] = ISpot.AccountDelta(token, account, loss);
         spotEngine.modifyAccount(deltas);
 
-        clearingService.coverLossWithInsuranceFund(spotEngine, token, account);
+        clearingService.coverLossWithInsuranceFund(account, uint256(-loss));
         assertEq(spotEngine.getBalance(account, token), int256(0));
-        assertEq(clearingService.getInsuranceFund(), fund - uint256(-loss));
+        assertEq(clearingService.getInsuranceFundBalance(), fund - uint256(-loss));
     }
 
     function test_coverLossWithInsuranceFund_revertsWhenUnauthorized() public {
         vm.expectRevert(Errors.Unauthorized.selector);
-        clearingService.coverLossWithInsuranceFund(spotEngine, token, account);
+        clearingService.coverLossWithInsuranceFund(account, 10);
     }
 
     function test_coverLossWithInsuranceFund_revertsIfSpotNotNegative() public {
@@ -180,7 +191,7 @@ contract ClearingServiceTest is Test {
         spotEngine.modifyAccount(deltas);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_NoLoss.selector, account, int256(balance)));
-        clearingService.coverLossWithInsuranceFund(spotEngine, token, account);
+        clearingService.coverLossWithInsuranceFund(account, 10);
     }
 
     function test_coverLossWithInsuranceFund_revertsIfInsufficientFund() public {
@@ -195,6 +206,6 @@ contract ClearingServiceTest is Test {
         spotEngine.modifyAccount(deltas);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_InsufficientFund.selector, uint256(-loss), fund));
-        clearingService.coverLossWithInsuranceFund(spotEngine, token, account);
+        clearingService.coverLossWithInsuranceFund(account, uint256(-loss));
     }
 }

@@ -13,7 +13,7 @@ import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEES, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
+import {MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEE_RATE, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
 
 /// @title Orderbook contract
@@ -110,8 +110,8 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
             takerDelta.quoteAmount = -makerDelta.quoteAmount;
         }
         if (
-            matchFee.maker > MathHelper.abs(makerDelta.quoteAmount.mul18D(MAX_MATCH_FEES))
-                || matchFee.taker > MathHelper.abs(takerDelta.quoteAmount.mul18D(MAX_MATCH_FEES))
+            matchFee.maker > MathHelper.abs(makerDelta.quoteAmount.mul18D(MAX_MATCH_FEE_RATE))
+                || matchFee.taker > MathHelper.abs(takerDelta.quoteAmount.mul18D(MAX_MATCH_FEE_RATE))
         ) {
             revert Errors.Orderbook_ExceededMaxTradingFee();
         }
@@ -233,7 +233,7 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
         uint128 _price
     ) internal returns (int128, int128) {
         ISpot.AccountDelta[] memory accountDeltas = new ISpot.AccountDelta[](1);
-        IPerp.Balance memory balance = perpEngine.getBalance(_account, _productIndex);
+        IPerp.Balance memory balance = perpEngine.getOpenPosition(_account, _productIndex);
         IPerp.FundingRate memory fundingRate = perpEngine.getFundingRate(_productIndex);
 
         //pay funding first

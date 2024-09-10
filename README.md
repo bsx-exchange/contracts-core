@@ -44,14 +44,15 @@ $ bun run test:coverage
 
 ## Deployments
 
-| Contracts                                    | Base Mainnet                                 |
-| -------------------------------------------- | -------------------------------------------- |
-| [Exchange](./src/Exchange.sol)               | `0x26A54955a5fb9472D3eDFeAc9B8E4c0ab5779eD3` |
-| [ClearingService](./src/ClearingService.sol) | `0x4a7f51E543b9DD6b259bcFD2FA2a3602eBd5679E` |
-| [Orderbook](./src/OrderBook.sol)             | `0xE8A973AA7600c1Dba1e7936B95f67A14e6257137` |
-| [SpotEngine](./src/Spot.sol)                 | `0x519086cd28A7A38C9701C0c914588DB4040FFCaE` |
-| [PerpEngine](./src/Perp.sol)                 | `0xE2EB30975B8d063B38FDd77892F65138Bc802Bc7` |
-| [Access](./src/access/Access.sol)            | `0x6c3Bb56d77E4225EEcE45Cde491f4A1a1649B034` |
+| Contracts                                                   | Base Mainnet                                 |
+| ----------------------------------------------------------- | -------------------------------------------- |
+| [Exchange](./contracts/exchange/Exchange.sol)               | `0x26A54955a5fb9472D3eDFeAc9B8E4c0ab5779eD3` |
+| [BSX1000](./contracts/bsx1000/BSX1000.sol)                  | `0x797d6f745F691133cE90438e1Ba3eeEb16e4b5B5` |
+| [ClearingService](./contracts/exchange/ClearingService.sol) | `0x4a7f51E543b9DD6b259bcFD2FA2a3602eBd5679E` |
+| [Orderbook](./contracts/exchange/OrderBook.sol)             | `0xE8A973AA7600c1Dba1e7936B95f67A14e6257137` |
+| [SpotEngine](./contracts/exchange/Spot.sol)                 | `0x519086cd28A7A38C9701C0c914588DB4040FFCaE` |
+| [PerpEngine](./contracts/exchange/Perp.sol)                 | `0xE2EB30975B8d063B38FDd77892F65138Bc802Bc7` |
+| [Access](./contracts/exchange/access/Access.sol)            | `0x6c3Bb56d77E4225EEcE45Cde491f4A1a1649B034` |
 
 ## License
 

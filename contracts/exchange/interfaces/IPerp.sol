@@ -35,11 +35,11 @@ interface IPerp {
     /// @param diffPrice Difference between index price and mark price
     function updateFundingRate(uint8 productIndex, int128 diffPrice) external returns (int128);
 
-    /// @notice Gets the balance of an account
+    /// @notice Gets the open position of an account of a market
     /// @param productIndex Product Id
     /// @param account Account address
     /// @return Balance of the account
-    function getBalance(address account, uint8 productIndex) external view returns (Balance memory);
+    function getOpenPosition(address account, uint8 productIndex) external view returns (Balance memory);
 
     /// @notice Gets the funding rate of a market.
     /// @param productIndex Product Id

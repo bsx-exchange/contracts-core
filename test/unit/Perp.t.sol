@@ -3,9 +3,9 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {Test} from "forge-std/Test.sol";
 
-import {IPerp, Perp} from "src/Perp.sol";
-import {Access} from "src/access/Access.sol";
-import {Errors} from "src/lib/Errors.sol";
+import {IPerp, Perp} from "contracts/exchange/Perp.sol";
+import {Access} from "contracts/exchange/access/Access.sol";
+import {Errors} from "contracts/exchange/lib/Errors.sol";
 
 contract PerpTest is Test {
     address private exchange = makeAddr("exchange");
@@ -18,6 +18,10 @@ contract PerpTest is Test {
     function setUp() public {
         access = new Access();
         access.initialize(address(this));
+
+        // migrate new admin role
+        access.migrateAdmin();
+
         access.setExchange(exchange);
         access.setClearingService(clearingService);
         access.setOrderBook(orderBook);
@@ -74,7 +78,7 @@ contract PerpTest is Test {
         deltas[1] = IPerp.AccountDelta({productIndex: 1, account: makeAddr("account1"), amount: 200, quoteAmount: -100});
         for (uint256 i = 0; i < deltas.length; i++) {
             perpEngine.modifyAccount(deltas);
-            IPerp.Balance memory balance = perpEngine.getBalance(deltas[i].account, deltas[i].productIndex);
+            IPerp.Balance memory balance = perpEngine.getOpenPosition(deltas[i].account, deltas[i].productIndex);
             assertEq(balance.size, deltas[i].amount);
             assertEq(balance.quoteBalance, deltas[i].quoteAmount);
         }

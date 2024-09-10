@@ -1,48 +1,30 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.25 <0.9.0;
 
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {Test} from "forge-std/Test.sol";
 import {StdStorage, stdStorage} from "forge-std/Test.sol";
 
-import {ERC1271} from "./mock/ERC1271.sol";
-import {ERC20MissingReturn} from "./mock/ERC20MissingReturn.sol";
-import {ERC20Simple} from "./mock/ERC20Simple.sol";
+import {Helper} from "../Helper.sol";
+import {ERC1271} from "../mock/ERC1271.sol";
+import {ERC20MissingReturn} from "../mock/ERC20MissingReturn.sol";
+import {ERC20Simple} from "../mock/ERC20Simple.sol";
+import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 
-import {ClearingService} from "src/ClearingService.sol";
-import {Exchange, IExchange} from "src/Exchange.sol";
-import {IOrderBook, OrderBook} from "src/OrderBook.sol";
-import {IPerp, Perp} from "src/Perp.sol";
-import {ISpot, Spot} from "src/Spot.sol";
-import {Access} from "src/access/Access.sol";
-import {IERC3009Minimal} from "src/interfaces/external/IERC3009Minimal.sol";
-import {Errors} from "src/lib/Errors.sol";
-import {LibOrder} from "src/lib/LibOrder.sol";
-import {MathHelper} from "src/lib/MathHelper.sol";
-import {Percentage} from "src/lib/Percentage.sol";
-import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT} from "src/share/Constants.sol";
-import {OrderSide} from "src/share/Enums.sol";
-
-library Helper {
-    /// @dev add this to exclude from the coverage report
-    function test() public pure returns (bool) {
-        return true;
-    }
-
-    function toArray(bytes memory data) internal pure returns (bytes[] memory) {
-        bytes[] memory array = new bytes[](1);
-        array[0] = data;
-        return array;
-    }
-
-    function convertTo18D(uint256 x, uint8 decimals) internal pure returns (uint256) {
-        return x * 10 ** 18 / 10 ** decimals;
-    }
-
-    function convertFrom18D(uint256 x, uint8 decimals) internal pure returns (uint256) {
-        return x * 10 ** decimals / 10 ** 18;
-    }
-}
+import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
+import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
+import {IPerp, Perp} from "contracts/exchange/Perp.sol";
+import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Access} from "contracts/exchange/access/Access.sol";
+import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
+import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
+import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
+import {Percentage} from "contracts/exchange/lib/Percentage.sol";
+import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT} from "contracts/exchange/share/Constants.sol";
+import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
 contract ExchangeTest is Test {
@@ -103,6 +85,13 @@ contract ExchangeTest is Test {
         access = new Access();
         access.initialize(sequencer);
 
+        // migrate new role
+        access.migrateAdmin();
+        access.grantRole(access.GENERAL_ROLE(), sequencer);
+        access.grantRole(access.BATCH_OPERATOR_ROLE(), sequencer);
+        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), sequencer);
+        access.grantRole(access.SIGNER_OPERATOR_ROLE(), sequencer);
+
         clearingService = new ClearingService();
         clearingService.initialize(address(access));
 
@@ -122,10 +111,13 @@ contract ExchangeTest is Test {
         );
 
         exchange = new Exchange();
+        bytes memory code = address(new UniversalSigValidator()).code;
+        vm.etch(address(exchange.UNIVERSAL_SIG_VALIDATOR()), code);
 
         access.setExchange(address(exchange));
         access.setClearingService(address(clearingService));
         access.setOrderBook(address(orderbook));
+        access.setSpotEngine(address(spotEngine));
 
         exchange.initialize(
             address(access),
@@ -143,7 +135,7 @@ contract ExchangeTest is Test {
     }
 
     function test_initialize() public view {
-        assertEq(address(exchange.accessContract()), address(access));
+        assertEq(address(exchange.access()), address(access));
         assertEq(address(exchange.clearingService()), address(clearingService));
         assertEq(address(exchange.spotEngine()), address(spotEngine));
         assertEq(address(exchange.perpEngine()), address(perpEngine));
@@ -193,7 +185,13 @@ contract ExchangeTest is Test {
     }
 
     function test_addSupportedToken_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.addSupportedToken(makeAddr("token"));
     }
 
@@ -222,7 +220,13 @@ contract ExchangeTest is Test {
         exchange.addSupportedToken(supportedToken);
         assertEq(exchange.isSupportedToken(supportedToken), true);
 
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.removeSupportedToken(supportedToken);
     }
 
@@ -235,7 +239,13 @@ contract ExchangeTest is Test {
     }
 
     function test_updateFeeRecipient_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.updateFeeRecipientAddress(makeAddr("newFeeRecipient"));
     }
 
@@ -296,6 +306,10 @@ contract ExchangeTest is Test {
     function test_deposit_revertsIfZeroAmount() public {
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
         exchange.deposit(address(collateralToken), 0);
+
+        uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.deposit(address(collateralToken), maxZeroScaledAmount);
     }
 
     function test_deposit_revertsIfTokenNotSupported() public {
@@ -365,6 +379,10 @@ contract ExchangeTest is Test {
         address recipient = makeAddr("recipient");
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
         exchange.deposit(recipient, address(collateralToken), 0);
+
+        uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.deposit(recipient, address(collateralToken), maxZeroScaledAmount);
     }
 
     function test_deposit_withRecipient_revertsIfTokenNotSupported() public {
@@ -503,9 +521,15 @@ contract ExchangeTest is Test {
 
     function test_depositWithAuthorization_revertsIfZeroAmount() public {
         vm.startPrank(sequencer);
+
+        address account = makeAddr("account");
         uint128 zeroAmount = 0;
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
-        exchange.depositWithAuthorization(address(collateralToken), makeAddr("account"), zeroAmount, 0, 0, 0, "");
+        exchange.depositWithAuthorization(address(collateralToken), account, zeroAmount, 0, 0, 0, "");
+
+        uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.depositWithAuthorization(address(collateralToken), account, maxZeroScaledAmount, 0, 0, 0, "");
     }
 
     function test_depositWithAuthorization_revertsIfTokenNotSupported() public {
@@ -544,11 +568,11 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.AddSigningWallet, addSigningWalletData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.SigningWallet(account, signer, exchange.executedTransactionCounter());
+        emit IExchange.RegisterSigner(account, signer, nonce);
         exchange.processBatch(operation.toArray());
 
         assertEq(exchange.isSigningWallet(account, signer), true);
-        assertEq(exchange.usedNonces(account, nonce), true);
+        assertEq(exchange.isRegisterSignerNonceUsed(account, nonce), true);
     }
 
     function test_processBatch_addSigningWallet_smartContract() public {
@@ -575,11 +599,11 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.AddSigningWallet, addSigningWalletData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.SigningWallet(contractAccount, signer, exchange.executedTransactionCounter());
+        emit IExchange.RegisterSigner(contractAccount, signer, nonce);
         exchange.processBatch(operation.toArray());
 
         assertEq(exchange.isSigningWallet(contractAccount, signer), true);
-        assertEq(exchange.usedNonces(contractAccount, nonce), true);
+        assertEq(exchange.isRegisterSignerNonceUsed(contractAccount, nonce), true);
         assertEq(exchange.isSigningWallet(owner, signer), false);
     }
 
@@ -661,7 +685,7 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.AddSigningWallet, addSigningWalletData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.SigningWallet(account, signer, exchange.executedTransactionCounter());
+        emit IExchange.RegisterSigner(account, signer, nonce);
         exchange.processBatch(operation.toArray());
 
         operation = _encodeDataToOperation(IExchange.OperationType.AddSigningWallet, addSigningWalletData);
@@ -1406,8 +1430,8 @@ contract ExchangeTest is Test {
         int128 tradingFees = orderbook.getTradingFees();
         assertEq(tradingFees, generalOrder.fee.maker + generalOrder.fee.taker - int128(generalOrder.fee.referralRebate));
 
-        IPerp.Balance memory makerPerpBalance = perpEngine.getBalance(maker, generalOrder.productId);
-        IPerp.Balance memory takerPerpBalance = perpEngine.getBalance(taker, generalOrder.productId);
+        IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
+        IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
 
         // maker goes long
         assertEq(makerPerpBalance.size, int128(generalOrder.size));
@@ -1500,7 +1524,7 @@ contract ExchangeTest is Test {
             referralRebate.makerReferrerRebateRate
         ) + uint128(generalOrder.fee.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
 
-        uint256 insuranceFundBefore = clearingService.getInsuranceFund();
+        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         vm.expectEmit(address(exchange));
         emit IExchange.RebateReferrer(
@@ -1542,8 +1566,8 @@ contract ExchangeTest is Test {
             generalOrder.fee.maker + generalOrder.fee.taker - int128(generalOrder.fee.referralRebate)
         );
 
-        IPerp.Balance memory makerPerpBalance = perpEngine.getBalance(maker, generalOrder.productId);
-        IPerp.Balance memory takerPerpBalance = perpEngine.getBalance(taker, generalOrder.productId);
+        IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
+        IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
 
         // maker goes long
         assertEq(makerPerpBalance.size, int128(generalOrder.size));
@@ -1553,7 +1577,7 @@ contract ExchangeTest is Test {
         );
 
         // taker goes short
-        uint256 liquidationFee = clearingService.getInsuranceFund() - insuranceFundBefore;
+        uint256 liquidationFee = clearingService.getInsuranceFundBalance() - insuranceFundBefore;
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
         assertEq(
             takerPerpBalance.quoteBalance,
@@ -1744,8 +1768,8 @@ contract ExchangeTest is Test {
         int128 tradingFees = orderbook.getTradingFees();
         assertEq(tradingFees, generalOrder.fee.taker - int128(generalOrder.fee.referralRebate));
 
-        IPerp.Balance memory makerPerpBalance = perpEngine.getBalance(maker, generalOrder.productId);
-        IPerp.Balance memory takerPerpBalance = perpEngine.getBalance(taker, generalOrder.productId);
+        IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
+        IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
 
         // maker goes long
         assertEq(makerPerpBalance.size, int128(generalOrder.size));
@@ -1840,7 +1864,7 @@ contract ExchangeTest is Test {
             generalOrder.fee.referralRebate =
                 uint128(generalOrder.fee.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
         }
-        uint256 insuranceFundBefore = clearingService.getInsuranceFund();
+        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         // not charge maker fee
         generalOrder.fee.maker = 0;
@@ -1869,15 +1893,15 @@ contract ExchangeTest is Test {
         int128 tradingFees = orderbook.getTradingFees();
         assertEq(tradingFees, generalOrder.fee.taker - int128(generalOrder.fee.referralRebate));
 
-        IPerp.Balance memory makerPerpBalance = perpEngine.getBalance(maker, generalOrder.productId);
-        IPerp.Balance memory takerPerpBalance = perpEngine.getBalance(taker, generalOrder.productId);
+        IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
+        IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
 
         // maker goes long
         assertEq(makerPerpBalance.size, int128(generalOrder.size));
         assertEq(makerPerpBalance.quoteBalance, -int128(generalOrder.size).mul18D(int128(generalOrder.price)));
 
         // taker goes short
-        uint256 liquidationFee = clearingService.getInsuranceFund() - insuranceFundBefore;
+        uint256 liquidationFee = clearingService.getInsuranceFundBalance() - insuranceFundBefore;
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
         assertEq(
             takerPerpBalance.quoteBalance,
@@ -1889,7 +1913,7 @@ contract ExchangeTest is Test {
         assertEq(exchange.balanceOf(maker, address(collateralToken)), -rebateMaker);
     }
 
-    function test_processBatch_withdraw() public {
+    function test_processBatch_withdraw_EOA() public {
         collateralToken.mint(address(exchange), type(uint128).max);
 
         uint128 amount = 5 * 1e18;
@@ -1923,17 +1947,80 @@ contract ExchangeTest is Test {
 
         uint256 balanceAfter = totalBalanceStateBefore - amount;
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawInfo(address(collateralToken), account, amount, balanceAfter, nonce, withdrawFee);
+        emit IExchange.WithdrawSucceeded(address(collateralToken), account, nonce, amount, balanceAfter, withdrawFee);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
-        assertEq(exchange.isWithdrawSuccess(account, nonce), true);
+        assertEq(exchange.isWithdrawNonceUsed(account, nonce), true);
         assertEq(spotEngine.getBalance(address(collateralToken), account), accountBalanceStateBefore - int128(amount));
         assertEq(spotEngine.getTotalBalance(address(collateralToken)), balanceAfter);
 
         uint8 tokenDecimals = collateralToken.decimals();
         uint128 netAmount = amount - withdrawFee;
         assertEq(collateralToken.balanceOf(account), accountBalanceBefore + netAmount.convertFrom18D(tokenDecimals));
+        assertEq(
+            collateralToken.balanceOf(address(exchange)),
+            exchangeBalanceBefore - netAmount.convertFrom18D(tokenDecimals)
+        );
+    }
+
+    function test_processBatch_withdraw_smartContract() public {
+        collateralToken.mint(address(exchange), type(uint128).max);
+
+        (address owner, uint256 ownerKey) = makeAddrAndKey("owner");
+        address contractAccount = address(new ERC1271(owner));
+        uint128 amount = 5 * 1e18;
+
+        {
+            vm.startPrank(address(exchange));
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] =
+                ISpot.AccountDelta({token: address(collateralToken), account: contractAccount, amount: int128(amount)});
+            spotEngine.modifyAccount(deltas);
+            spotEngine.setTotalBalance(address(collateralToken), amount, true);
+            vm.stopPrank();
+        }
+
+        int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), contractAccount);
+        uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));
+
+        uint256 exchangeBalanceBefore = collateralToken.balanceOf(address(exchange));
+        uint256 accountBalanceBefore = collateralToken.balanceOf(contractAccount);
+
+        uint64 nonce = 1;
+        bytes memory signature = _signTypedDataHash(
+            ownerKey,
+            keccak256(
+                abi.encode(exchange.WITHDRAW_TYPEHASH(), contractAccount, address(collateralToken), amount, nonce)
+            )
+        );
+        uint128 withdrawFee = 1 * 1e16;
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.Withdraw,
+            abi.encode(
+                IExchange.Withdraw(contractAccount, address(collateralToken), amount, nonce, signature, withdrawFee)
+            )
+        );
+
+        uint256 balanceAfter = totalBalanceStateBefore - amount;
+        vm.expectEmit(address(exchange));
+        emit IExchange.WithdrawSucceeded(
+            address(collateralToken), contractAccount, nonce, amount, balanceAfter, withdrawFee
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isWithdrawNonceUsed(contractAccount, nonce), true);
+        assertEq(
+            spotEngine.getBalance(address(collateralToken), contractAccount), accountBalanceStateBefore - int128(amount)
+        );
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), balanceAfter);
+
+        uint8 tokenDecimals = collateralToken.decimals();
+        uint128 netAmount = amount - withdrawFee;
+        assertEq(
+            collateralToken.balanceOf(contractAccount), accountBalanceBefore + netAmount.convertFrom18D(tokenDecimals)
+        );
         assertEq(
             collateralToken.balanceOf(address(exchange)),
             exchangeBalanceBefore - netAmount.convertFrom18D(tokenDecimals)
@@ -1951,6 +2038,60 @@ contract ExchangeTest is Test {
         );
         vm.expectRevert(Errors.Exchange_DisabledWithdraw.selector);
         exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_withdraw_smartContract_revertsIfInvalidSignature() public {
+        collateralToken.mint(address(exchange), type(uint128).max);
+
+        (address owner, uint256 ownerKey) = makeAddrAndKey("owner");
+        address contractAccount = address(new ERC1271(owner));
+        uint128 amount = 5 * 1e18;
+
+        {
+            vm.startPrank(address(exchange));
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] =
+                ISpot.AccountDelta({token: address(collateralToken), account: contractAccount, amount: int128(amount)});
+            spotEngine.modifyAccount(deltas);
+            spotEngine.setTotalBalance(address(collateralToken), amount, true);
+            vm.stopPrank();
+        }
+
+        int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), contractAccount);
+        uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));
+
+        uint256 exchangeBalanceBefore = collateralToken.balanceOf(address(exchange));
+        uint256 accountBalanceBefore = collateralToken.balanceOf(contractAccount);
+
+        uint64 nonce = 1;
+        bytes memory signature = _signTypedDataHash(
+            ownerKey,
+            keccak256(
+                abi.encode(exchange.WITHDRAW_TYPEHASH(), contractAccount, address(collateralToken), amount, nonce)
+            )
+        );
+        uint128 withdrawFee = 1 * 1e16;
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.Withdraw,
+            abi.encode(
+                IExchange.Withdraw(contractAccount, address(collateralToken), amount, nonce, signature, withdrawFee)
+            )
+        );
+
+        // contract updates the owner before the withdraw is processed
+        ERC1271(contractAccount).setNewOwner(makeAddr("newOwner"));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.WithdrawFailed(contractAccount, nonce, 0, 0);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isWithdrawNonceUsed(contractAccount, nonce), true);
+        assertEq(spotEngine.getBalance(address(collateralToken), contractAccount), accountBalanceStateBefore);
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), totalBalanceStateBefore);
+
+        assertEq(collateralToken.balanceOf(contractAccount), accountBalanceBefore);
+        assertEq(collateralToken.balanceOf(address(exchange)), exchangeBalanceBefore);
     }
 
     function test_processBatch_withdraw_revertsIfExceededMaxFee() public {
@@ -2019,6 +2160,12 @@ contract ExchangeTest is Test {
             vm.stopPrank();
         }
 
+        int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), account);
+        uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));
+
+        uint256 exchangeBalanceBefore = collateralToken.balanceOf(address(exchange));
+        uint256 accountBalanceBefore = collateralToken.balanceOf(account);
+
         vm.startPrank(sequencer);
 
         uint64 nonce = 1;
@@ -2033,10 +2180,15 @@ contract ExchangeTest is Test {
             abi.encode(IExchange.Withdraw(account, address(collateralToken), withdrawAmount, nonce, signature, 0));
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Withdraw, data);
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawRejected(account, nonce, withdrawAmount, int128(balance));
+        emit IExchange.WithdrawFailed(account, nonce, withdrawAmount, int128(balance));
         exchange.processBatch(operation.toArray());
 
-        assertEq(exchange.isWithdrawSuccess(account, nonce), false);
+        assertEq(exchange.isWithdrawNonceUsed(account, nonce), true);
+        assertEq(spotEngine.getBalance(address(collateralToken), account), accountBalanceStateBefore);
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), totalBalanceStateBefore);
+
+        assertEq(collateralToken.balanceOf(account), accountBalanceBefore);
+        assertEq(collateralToken.balanceOf(address(exchange)), exchangeBalanceBefore);
     }
 
     function test_processBatch_withdraw_revertsIfWithdrawAmountTooSmall() public {
@@ -2068,10 +2220,10 @@ contract ExchangeTest is Test {
             abi.encode(IExchange.Withdraw(account, address(collateralToken), withdrawAmount, nonce, signature, 0));
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Withdraw, data);
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawRejected(account, nonce, withdrawAmount, int128(balance));
+        emit IExchange.WithdrawFailed(account, nonce, withdrawAmount, int128(balance));
         exchange.processBatch(operation.toArray());
 
-        assertEq(exchange.isWithdrawSuccess(account, nonce), false);
+        assertEq(exchange.isWithdrawNonceUsed(account, nonce), true);
     }
 
     function test_processBatch_coverLossWithInsuranceFund() public {
@@ -2089,13 +2241,13 @@ contract ExchangeTest is Test {
         }
 
         bytes memory operation =
-            _encodeDataToOperation(IExchange.OperationType.CoverLossByInsuranceFund, abi.encode(account));
+            _encodeDataToOperation(IExchange.OperationType.CoverLossByInsuranceFund, abi.encode(account, loss));
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
         assertEq(spotEngine.getBalance(account, address(collateralToken)), 0);
-        assertEq(clearingService.getInsuranceFund(), insuranceFund - loss);
+        assertEq(clearingService.getInsuranceFundBalance(), insuranceFund - loss);
     }
 
     function test_processBatch_cumulateFundingRate() public {
@@ -2111,7 +2263,7 @@ contract ExchangeTest is Test {
         int128 cumulativeFundingRate = perpEngine.getFundingRate(productId).cumulativeFunding18D;
         cumulativeFundingRate += premiumRate;
         vm.expectEmit(address(exchange));
-        emit IExchange.FundingRate(productId, premiumRate, cumulativeFundingRate, exchange.executedTransactionCounter());
+        emit IExchange.UpdateFundingRate(productId, premiumRate, cumulativeFundingRate);
         exchange.processBatch(operation.toArray());
     }
 
@@ -2170,7 +2322,13 @@ contract ExchangeTest is Test {
     }
 
     function test_processBatch_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.BATCH_OPERATOR_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         bytes[] memory data = new bytes[](0);
         exchange.processBatch(data);
     }
@@ -2201,11 +2359,11 @@ contract ExchangeTest is Test {
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.RegisterSigningWallet(account, signer, nonce);
+        emit IExchange.RegisterSigner(account, signer, nonce);
         exchange.registerSigningWallet(account, signer, message, nonce, accountSignature, signerSignature);
 
         assertEq(exchange.isSigningWallet(account, signer), true);
-        assertEq(exchange.usedNonces(account, nonce), true);
+        assertEq(exchange.isRegisterSignerNonceUsed(account, nonce), true);
     }
 
     function test_registerSigningWallet_smartContract() public {
@@ -2227,11 +2385,11 @@ contract ExchangeTest is Test {
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.RegisterSigningWallet(contractAccount, signer, nonce);
+        emit IExchange.RegisterSigner(contractAccount, signer, nonce);
         exchange.registerSigningWallet(contractAccount, signer, message, nonce, ownerSignature, signerSignature);
 
         assertEq(exchange.isSigningWallet(contractAccount, signer), true);
-        assertEq(exchange.usedNonces(contractAccount, nonce), true);
+        assertEq(exchange.isRegisterSignerNonceUsed(contractAccount, nonce), true);
         assertEq(exchange.isSigningWallet(owner, signer), false);
     }
 
@@ -2337,7 +2495,13 @@ contract ExchangeTest is Test {
     }
 
     function test_unregisterSigningWallet_revertsIfUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.SIGNER_OPERATOR_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.unregisterSigningWallet(address(0x12), address(0x34));
     }
 
@@ -2365,7 +2529,13 @@ contract ExchangeTest is Test {
     }
 
     function test_claimCollectedTradingFees_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.claimTradingFees();
     }
 
@@ -2395,7 +2565,13 @@ contract ExchangeTest is Test {
     }
 
     function test_claimCollectedSequencerFees_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.claimSequencerFees();
     }
 
@@ -2414,15 +2590,32 @@ contract ExchangeTest is Test {
             emit IExchange.DepositInsuranceFund(amount, totalAmount);
             exchange.depositInsuranceFund(amount);
 
-            assertEq(clearingService.getInsuranceFund(), totalAmount);
-            assertEq(exchange.getBalanceInsuranceFund(), totalAmount);
+            assertEq(clearingService.getInsuranceFundBalance(), totalAmount);
+            assertEq(exchange.getInsuranceFundBalance(), totalAmount);
             assertEq(collateralToken.balanceOf(address(exchange)), totalAmount.convertFrom18D(tokenDecimals));
         }
     }
 
     function test_depositInsuranceFund_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.depositInsuranceFund(100);
+    }
+
+    function test_depositInsuranceFund_revertsIfZeroAmount() public {
+        vm.startPrank(sequencer);
+        uint128 zeroAmount = 0;
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.depositInsuranceFund(zeroAmount);
+
+        uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.depositInsuranceFund(maxZeroScaledAmount);
     }
 
     function test_withdrawInsuranceFund() public {
@@ -2447,14 +2640,31 @@ contract ExchangeTest is Test {
             emit IExchange.WithdrawInsuranceFund(amount, totalAmount);
             exchange.withdrawInsuranceFund(amount);
 
-            assertEq(clearingService.getInsuranceFund(), totalAmount);
+            assertEq(clearingService.getInsuranceFundBalance(), totalAmount);
             assertEq(collateralToken.balanceOf(address(exchange)), totalAmount.convertFrom18D(tokenDecimals));
         }
     }
 
     function test_withdrawInsuranceFund_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.withdrawInsuranceFund(100);
+    }
+
+    function test_withdrawInsuranceFund_revertsIfZeroAmount() public {
+        vm.startPrank(sequencer);
+        uint128 zeroAmount = 0;
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.withdrawInsuranceFund(zeroAmount);
+
+        uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.withdrawInsuranceFund(maxZeroScaledAmount);
     }
 
     function test_setPauseBatchProcess() public {
@@ -2470,7 +2680,13 @@ contract ExchangeTest is Test {
     }
 
     function test_setPauseBatchProcess_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.setPauseBatchProcess(true);
     }
 
@@ -2487,7 +2703,13 @@ contract ExchangeTest is Test {
     }
 
     function test_enableDeposit_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.setCanDeposit(true);
     }
 
@@ -2504,7 +2726,13 @@ contract ExchangeTest is Test {
     }
 
     function test_setCanWithdraw_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+
+        vm.startPrank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
         exchange.setCanWithdraw(true);
     }
 
@@ -2524,7 +2752,7 @@ contract ExchangeTest is Test {
 
         string memory message = "message";
         uint64 nonce = 0;
-        while (exchange.usedNonces(account, nonce)) {
+        while (exchange.isRegisterSignerNonceUsed(account, nonce)) {
             nonce++;
         }
 
@@ -2640,5 +2868,9 @@ contract ExchangeTest is Test {
         bytes32 digest = MessageHashUtils.toTypedDataHash(domainSeparator, structHash);
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
         signature = abi.encodePacked(r, s, v);
+    }
+
+    function _maxZeroScaledAmount() private view returns (uint128) {
+        return uint128(uint128(1).convertTo18D(collateralToken.decimals()) - 1);
     }
 }

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity >=0.8.25 <0.9.0;
 
 /// @notice An implementation of ERC-20 that does not return a boolean in {transfer} and {transferFrom}.

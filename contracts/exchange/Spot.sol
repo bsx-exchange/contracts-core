@@ -71,26 +71,4 @@ contract Spot is ISpot, Initializable, OwnableUpgradeable {
             emit UpdateBalance(account, token, amount, updatedBalance);
         }
     }
-
-    /*//////////////////////////////////////////////////////////////////////////
-                                DEVELOPMENT ONLY
-    //////////////////////////////////////////////////////////////////////////*/
-    struct BalanceInfo {
-        address account;
-        address token;
-        int256 amount;
-    }
-
-    function resetBalance(address _account, address _token) external onlySequencer {
-        balance[_account][_token].amount = 0;
-    }
-
-    function getBalances(address[] calldata _accounts, address _token) external view returns (BalanceInfo[] memory) {
-        BalanceInfo[] memory balances = new BalanceInfo[](_accounts.length);
-        for (uint256 index = 0; index < _accounts.length; ++index) {
-            address account = _accounts[index];
-            balances[index] = BalanceInfo(account, _token, balance[account][_token].amount);
-        }
-        return balances;
-    }
 }

@@ -1,9 +1,9 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 pragma solidity >=0.8.25 <0.9.0;
 
 import {Test} from "forge-std/Test.sol";
 
-import {Percentage} from "src/lib/Percentage.sol";
+import {Percentage} from "contracts/exchange/lib/Percentage.sol";
 
 contract PercentageTest is Test {
     using Percentage for uint128;

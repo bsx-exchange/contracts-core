@@ -12,11 +12,8 @@ interface IExchange {
     /// @param token Token address which is removed
     event SupportedTokenRemoved(address indexed token);
 
-    /// @dev Emitted when an account authorizes a wallet to sign on its behalf
-    event RegisterSigningWallet(address indexed account, address indexed signer, uint64 nonce);
-
-    /// @dev Emitted when an account authorizes a wallet to sign on its behalf
-    event SigningWallet(address indexed sender, address indexed signer, uint32 indexed transactionId);
+    /// @dev Emitted when an account authorizes a signer to sign on its behalf
+    event RegisterSigner(address indexed account, address indexed signer, uint64 nonce);
 
     /// @dev Emitted when a user deposits tokens to the exchange
     /// @param token Token address
@@ -25,28 +22,29 @@ interface IExchange {
     /// @param balance Balance of user after deposit
     event Deposit(address indexed token, address indexed user, uint256 amount, uint256 balance);
 
-    /// @dev Emitted when a user withdraws tokens from the exchange.
+    /// @dev Emitted when a user withdraws tokens from the exchange successfully.
     /// @param token Token address
-    /// @param user  Account address
+    /// @param user Account address
+    /// @param nonce Nonce of the withdrawal
     /// @param amount Withdraw amount (in 18 decimals)
     /// @param balance Balance of account after withdraw (in 18 decimals)
-    /// @param nonce Nonce of the withdrawal
     /// @param withdrawalSequencerFee Sequencer fee of the withdrawal (in 18 decimals)
-    event WithdrawInfo(
+    event WithdrawSucceeded(
         address indexed token,
         address indexed user,
+        uint64 indexed nonce,
         uint256 amount,
         uint256 balance,
-        uint64 nonce,
         uint256 withdrawalSequencerFee
     );
 
     /// @dev Emitted when a user is rejected to withdraw tokens from the exchange
-    /// @param sender Account address
+    /// `amount` and `balance` will be returned 0 if the withdrawal is rejected due to invalid signature
+    /// @param user Account address
     /// @param nonce Nonce of the withdrawal
-    /// @param withdrawAmount Withdraw amount (in 18 decimals)
-    /// @param spotBalance Balance of account after withdraw (in 18 decimals)
-    event WithdrawRejected(address sender, uint64 nonce, uint128 withdrawAmount, int256 spotBalance);
+    /// @param amount Withdraw amount (in 18 decimals)
+    /// @param balance Balance of account after withdraw (in 18 decimals)
+    event WithdrawFailed(address indexed user, uint64 indexed nonce, uint128 amount, int256 balance);
 
     /// @dev Emitted when referral rebate is paid
     /// @param referrer Referrer address
@@ -62,13 +60,7 @@ interface IExchange {
     /// @param productIndex Product id
     /// @param diffPrice Premium funding rate
     /// @param cummulativeFundingRate Cumulative funding rate
-    /// @param transactionId Transaction id
-    event FundingRate(
-        uint8 indexed productIndex,
-        int256 indexed diffPrice,
-        int256 indexed cummulativeFundingRate,
-        uint32 transactionId
-    );
+    event UpdateFundingRate(uint8 indexed productIndex, int256 diffPrice, int256 cummulativeFundingRate);
 
     /// @dev Emitted when the insurance fund is deposited.
     /// @param depositAmount Deposit amount (in 18 decimals)
@@ -82,6 +74,19 @@ interface IExchange {
 
     event ClaimTradingFees(address indexed claimer, uint256 amount);
     event ClaimSequencerFees(address indexed claimer, uint256 amount);
+
+    /// @notice deprecated, use `WithdrawSucceeded` instead
+    event WithdrawInfo(
+        address indexed token,
+        address indexed user,
+        uint256 amount,
+        uint256 balance,
+        uint64 nonce,
+        uint256 withdrawalSequencerFee
+    );
+
+    /// @notice deprecated, use `WithdrawFailed` instead
+    event WithdrawRejected(address sender, uint64 nonce, uint128 withdrawAmount, int256 spotBalance);
 
     /// @notice All operation types in the exchange
     enum OperationType {
@@ -121,27 +126,6 @@ interface IExchange {
         uint64 nonce;
         bytes signature;
         uint128 withdrawalSequencerFee;
-    }
-
-    /// @dev This struct is used for update funding rate.
-    /// @param productIndex Product id
-    /// @param priceDiff difference price between index price and mark price
-    struct UpdateFundingRate {
-        uint8 productIndex;
-        int128 priceDiff;
-        uint128 lastFundingRateUpdateSequenceNumber;
-    }
-
-    /// @notice decprecated
-    struct WithdrawalInfo {
-        address token;
-        address user;
-        uint256 amount;
-        uint256 scaledAmount18D;
-        uint256 requestTime;
-        uint8 productIndex;
-        bool approved;
-        bool isWithdrawSuccess;
     }
 
     /// @notice Adds the supported token. Only admin can call this function
@@ -235,9 +219,9 @@ interface IExchange {
     /// @return Amount of token
     function balanceOf(address user, address token) external view returns (int256);
 
-    /// @dev This function get the amount of insurance fund.
+    /// @dev This function get the balance of insurance fund.
     /// @return Amount of insurance fund
-    function getBalanceInsuranceFund() external view returns (uint256);
+    function getInsuranceFundBalance() external view returns (uint256);
 
     /// @notice Gets the supported token list
     /// @return List of supported token

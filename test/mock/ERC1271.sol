@@ -16,6 +16,11 @@ contract ERC1271 is IERC1271 {
         return true;
     }
 
+    /// @notice Sets the new owner of the contract.
+    function setNewOwner(address _owner) external {
+        owner = _owner;
+    }
+
     /// @notice Verifies that the signer is the owner of the signing contract.
     function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4 magicValue) {
         if (ECDSA.recover(hash, signature) == owner) {

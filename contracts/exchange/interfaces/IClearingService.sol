@@ -38,11 +38,10 @@ interface IClearingService {
     function collectLiquidationFee(address account, uint64 nonce, uint256 amount) external;
 
     /// @notice Uses the insurance fund to cover the loss of the account
-    /// @param spotEngine Spot engine address
-    /// @param token Collateral token address
     /// @param account Account address to cover loss
-    function coverLossWithInsuranceFund(ISpot spotEngine, address token, address account) external;
+    /// @param amount Amount to cover loss
+    function coverLossWithInsuranceFund(address account, uint256 amount) external;
 
     /// @notice Gets insurance fund balance
-    function getInsuranceFund() external view returns (uint256);
+    function getInsuranceFundBalance() external view returns (uint256);
 }

@@ -5,13 +5,11 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import {Perp} from "./Perp.sol";
-import {Spot} from "./Spot.sol";
 import {Access} from "./access/Access.sol";
 import {IClearingService} from "./interfaces/IClearingService.sol";
 import {IExchange} from "./interfaces/IExchange.sol";
@@ -20,8 +18,10 @@ import {IPerp} from "./interfaces/IPerp.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {IERC20Extend} from "./interfaces/external/IERC20Extend.sol";
 import {IERC3009Minimal} from "./interfaces/external/IERC3009Minimal.sol";
+import {IUniversalSigValidator} from "./interfaces/external/IUniversalSigValidator.sol";
 import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
+import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
 import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT, NAME, VERSION} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
@@ -35,17 +35,18 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     using LibOrder for LibOrder.Order;
     using SafeERC20 for IERC20Extend;
     using Percentage for uint128;
+    using MathHelper for uint256;
 
     IClearingService public clearingService;
     ISpot public spotEngine;
     IPerp public perpEngine;
     IOrderBook public book;
-    Access public accessContract;
+    Access public access;
 
     EnumerableSet.AddressSet private supportedTokens;
     mapping(address account => mapping(address signer => bool isAuthorized)) private _signingWallets;
-    mapping(uint256 requestId => WithdrawalInfo info) private _withdrawalInfo; // deprecated
-    mapping(address account => mapping(uint64 signingWalletsNonce => bool used)) public usedNonces;
+    mapping(uint256 requestId => bytes info) private _withdrawalInfo; // deprecated
+    mapping(address account => mapping(uint64 registerSignerNonce => bool used)) public isRegisterSignerNonceUsed;
 
     uint256 private _withdrawalRequestIDCounter; // deprecated
     uint256 private _forceWithdrawalGracePeriodSecond; // deprecated
@@ -59,7 +60,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     bool public canDeposit;
     bool public canWithdraw;
     bool public pauseBatchProcess;
-    mapping(address account => mapping(uint64 nonce => bool isSuccess)) public isWithdrawSuccess;
+    mapping(address account => mapping(uint64 withdrawNonce => bool used)) public isWithdrawNonceUsed;
     mapping(address account => bool isRequesting) private _isRequestingTwoPhaseWithdraw; // deprecated
 
     bytes32 public constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
@@ -68,6 +69,8 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
     bytes32 public constant ORDER_TYPEHASH =
         keccak256("Order(address sender,uint128 size,uint128 price,uint64 nonce,uint8 productIndex,uint8 orderSide)");
+    IUniversalSigValidator public constant UNIVERSAL_SIG_VALIDATOR =
+        IUniversalSigValidator(0x3F72193B6687707bfaA5119a3910eb4e27108bE8);
 
     function initialize(
         address _access,
@@ -85,7 +88,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             revert Errors.ZeroAddress();
         }
 
-        accessContract = Access(_access);
+        access = Access(_access);
         clearingService = IClearingService(_clearingService);
         spotEngine = ISpot(_spotEngine);
         perpEngine = IPerp(_perpEngine);
@@ -98,14 +101,14 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         pauseBatchProcess = false;
     }
 
-    function _onlyGeneralAdmin() internal view {
-        if (!accessContract.hasRole(accessContract.ADMIN_GENERAL_ROLE(), msg.sender)) {
-            revert Errors.Unauthorized();
+    function _checkRole(bytes32 role, address account) internal view {
+        if (!access.hasRole(role, account)) {
+            revert IAccessControl.AccessControlUnauthorizedAccount(account, role);
         }
     }
 
-    modifier onlyGeneralAdmin() {
-        _onlyGeneralAdmin();
+    modifier onlyRole(bytes32 role) {
+        _checkRole(role, msg.sender);
         _;
     }
 
@@ -117,7 +120,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     ///@inheritdoc IExchange
-    function addSupportedToken(address token) external onlyGeneralAdmin {
+    function addSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
         bool success = supportedTokens.add(token);
         if (!success) {
             revert Errors.Exchange_TokenAlreadySupported(token);
@@ -126,7 +129,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     ///@inheritdoc IExchange
-    function removeSupportedToken(address token) external onlyGeneralAdmin {
+    function removeSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
         bool success = supportedTokens.remove(token);
         if (!success) {
             revert Errors.Exchange_TokenNotSupported(token);
@@ -135,31 +138,23 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     ///@inheritdoc IExchange
-    function deposit(address tokenAddress, uint128 amount) external supportedToken(tokenAddress) {
-        if (!canDeposit) {
-            revert Errors.Exchange_DisabledDeposit();
-        }
-        if (amount == 0) revert Errors.Exchange_ZeroAmount();
-        IERC20Extend token = IERC20Extend(tokenAddress);
-        uint256 amountToTransfer = _convertToRawAmount(tokenAddress, amount);
-        token.safeTransferFrom(msg.sender, address(this), amountToTransfer);
-        clearingService.deposit(msg.sender, amount, tokenAddress, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(tokenAddress, msg.sender);
-        emit Deposit(tokenAddress, msg.sender, amount, uint256(currentBalance));
+    function deposit(address tokenAddress, uint128 amount) external {
+        deposit(msg.sender, tokenAddress, amount);
     }
 
     ///@inheritdoc IExchange
-    function deposit(address recipient, address tokenAddress, uint128 amount) external supportedToken(tokenAddress) {
+    function deposit(address recipient, address tokenAddress, uint128 amount) public supportedToken(tokenAddress) {
         if (!canDeposit) {
             revert Errors.Exchange_DisabledDeposit();
         }
-        if (amount == 0) revert Errors.Exchange_ZeroAmount();
         IERC20Extend token = IERC20Extend(tokenAddress);
-        uint256 amountToTransfer = _convertToRawAmount(tokenAddress, amount);
+        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(tokenAddress);
+        if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
+
         token.safeTransferFrom(msg.sender, address(this), amountToTransfer);
-        clearingService.deposit(recipient, amount, tokenAddress, spotEngine);
+        clearingService.deposit(recipient, roundDownAmount, tokenAddress, spotEngine);
         int256 currentBalance = spotEngine.getBalance(tokenAddress, recipient);
-        emit Deposit(tokenAddress, recipient, amount, uint256(currentBalance));
+        emit Deposit(tokenAddress, recipient, roundDownAmount, uint256(currentBalance));
     }
 
     ///@inheritdoc IExchange
@@ -171,11 +166,11 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         if (!canDeposit) {
             revert Errors.Exchange_DisabledDeposit();
         }
-        if (rawAmount == 0) revert Errors.Exchange_ZeroAmount();
         IERC20Extend token = IERC20Extend(tokenAddress);
-        token.safeTransferFrom(msg.sender, address(this), rawAmount);
+        uint256 scaledAmount = uint256(rawAmount).convertToScale(tokenAddress);
+        if (rawAmount == 0 || scaledAmount == 0) revert Errors.Exchange_ZeroAmount();
 
-        uint256 scaledAmount = (rawAmount * 10 ** 18) / 10 ** token.decimals();
+        token.safeTransferFrom(msg.sender, address(this), rawAmount);
         clearingService.deposit(recipient, scaledAmount, tokenAddress, spotEngine);
         int256 currentBalance = spotEngine.getBalance(tokenAddress, recipient);
         emit Deposit(tokenAddress, recipient, scaledAmount, uint256(currentBalance));
@@ -190,69 +185,70 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external onlyGeneralAdmin supportedToken(tokenAddress) {
+    ) external supportedToken(tokenAddress) {
         if (!canDeposit) {
             revert Errors.Exchange_DisabledDeposit();
         }
 
-        if (amount == 0) revert Errors.Exchange_ZeroAmount();
-        uint256 amountToTransfer = _convertToRawAmount(tokenAddress, amount);
+        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(tokenAddress);
+        if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
+
         IERC3009Minimal(tokenAddress).receiveWithAuthorization(
             depositor, address(this), amountToTransfer, validAfter, validBefore, nonce, signature
         );
-        clearingService.deposit(depositor, amount, tokenAddress, spotEngine);
+        clearingService.deposit(depositor, roundDownAmount, tokenAddress, spotEngine);
         int256 currentBalance = spotEngine.getBalance(tokenAddress, depositor);
-        emit Deposit(tokenAddress, depositor, amount, uint256(currentBalance));
+        emit Deposit(tokenAddress, depositor, roundDownAmount, uint256(currentBalance));
     }
 
     /// @inheritdoc IExchange
-    function depositInsuranceFund(uint256 amount) external onlyGeneralAdmin {
+    function depositInsuranceFund(uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
         address token = book.getCollateralToken();
+        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(token);
+        if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
-        uint256 amountToTransfer = _convertToRawAmount(token, uint128(amount));
         IERC20Extend(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
-        clearingService.depositInsuranceFund(amount);
+        clearingService.depositInsuranceFund(roundDownAmount);
 
-        uint256 insuranceFund = clearingService.getInsuranceFund();
-        emit DepositInsuranceFund(amount, insuranceFund);
+        uint256 insuranceFundBalance = clearingService.getInsuranceFundBalance();
+        emit DepositInsuranceFund(roundDownAmount, insuranceFundBalance);
     }
 
     /// @inheritdoc IExchange
-    function withdrawInsuranceFund(uint256 amount) external onlyGeneralAdmin {
+    function withdrawInsuranceFund(uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
         address token = book.getCollateralToken();
+        uint256 amountToTransfer = amount.convertFromScale(token);
+        if (amount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
-        uint256 amountToTransfer = _convertToRawAmount(token, uint128(amount));
         IERC20Extend(token).safeTransfer(msg.sender, amountToTransfer);
         clearingService.withdrawInsuranceFundEmergency(amount);
 
-        uint256 insuranceFund = clearingService.getInsuranceFund();
-        emit WithdrawInsuranceFund(amount, insuranceFund);
+        uint256 insuranceFundBalance = clearingService.getInsuranceFundBalance();
+        emit WithdrawInsuranceFund(amount, insuranceFundBalance);
     }
 
     /// @inheritdoc IExchange
-    function claimTradingFees() external onlyGeneralAdmin {
+    function claimTradingFees() external onlyRole(access.GENERAL_ROLE()) {
         address token = book.getCollateralToken();
-        int256 totalFee = book.claimTradingFees();
-        IERC20Extend tokenExtend = IERC20Extend(token);
-        uint256 amountToTransfer = _convertToRawAmount(token, uint128(uint256(totalFee)));
-        tokenExtend.safeTransfer(feeRecipientAddress, uint256(amountToTransfer));
-        emit ClaimTradingFees(msg.sender, uint256(totalFee));
+        uint256 totalFee = uint256(book.claimTradingFees());
+        uint256 amountToTransfer = totalFee.convertFromScale(token);
+        IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
+        emit ClaimTradingFees(msg.sender, totalFee);
     }
 
     /// @inheritdoc IExchange
-    function claimSequencerFees() external onlyGeneralAdmin {
+    function claimSequencerFees() external onlyRole(access.GENERAL_ROLE()) {
         address token = book.getCollateralToken();
-        int256 totalFee = _sequencerFee;
+        uint256 totalFee = uint256(_sequencerFee + book.claimSequencerFees());
         _sequencerFee = 0;
-        totalFee += book.claimSequencerFees();
-        IERC20Extend tokenExtend = IERC20Extend(token);
-        uint256 amountToTransfer = _convertToRawAmount(token, uint128(uint256(totalFee)));
-        tokenExtend.safeTransfer(feeRecipientAddress, uint256(amountToTransfer));
-        emit ClaimSequencerFees(msg.sender, uint256(totalFee));
+
+        uint256 amountToTransfer = totalFee.convertFromScale(token);
+        IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
+        emit ClaimSequencerFees(msg.sender, totalFee);
     }
 
     ///@inheritdoc IExchange
-    function processBatch(bytes[] calldata operations) external onlyGeneralAdmin {
+    function processBatch(bytes[] calldata operations) external onlyRole(access.BATCH_OPERATOR_ROLE()) {
         if (pauseBatchProcess) {
             revert Errors.Exchange_PausedProcessBatch();
         }
@@ -265,7 +261,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     ///@inheritdoc IExchange
-    function updateFeeRecipientAddress(address _feeRecipientAddress) external onlyGeneralAdmin {
+    function updateFeeRecipientAddress(address _feeRecipientAddress) external onlyRole(access.GENERAL_ROLE()) {
         if (_feeRecipientAddress == address(0)) {
             revert Errors.ZeroAddress();
         }
@@ -284,28 +280,31 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     /// @inheritdoc IExchange
-    function unregisterSigningWallet(address account, address signer) external onlyGeneralAdmin {
+    function unregisterSigningWallet(
+        address account,
+        address signer
+    ) external onlyRole(access.SIGNER_OPERATOR_ROLE()) {
         _signingWallets[account][signer] = false;
     }
 
     /// @inheritdoc IExchange
-    function setPauseBatchProcess(bool _pauseBatchProcess) external onlyGeneralAdmin {
+    function setPauseBatchProcess(bool _pauseBatchProcess) external onlyRole(access.GENERAL_ROLE()) {
         pauseBatchProcess = _pauseBatchProcess;
     }
 
     /// @inheritdoc IExchange
-    function setCanDeposit(bool _canDeposit) external onlyGeneralAdmin {
+    function setCanDeposit(bool _canDeposit) external onlyRole(access.GENERAL_ROLE()) {
         canDeposit = _canDeposit;
     }
 
     /// @inheritdoc IExchange
-    function setCanWithdraw(bool _canWithdraw) external onlyGeneralAdmin {
+    function setCanWithdraw(bool _canWithdraw) external onlyRole(access.GENERAL_ROLE()) {
         canWithdraw = _canWithdraw;
     }
 
     /// @inheritdoc IExchange
-    function getBalanceInsuranceFund() external view returns (uint256) {
-        return clearingService.getInsuranceFund();
+    function getInsuranceFundBalance() external view returns (uint256) {
+        return clearingService.getInsuranceFundBalance();
     }
 
     /// @inheritdoc IExchange
@@ -460,22 +459,22 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
 
             book.matchOrders(maker, taker, digest, maker.order.productIndex, takerSequencerFee, matchFee);
         } else if (operationType == OperationType.UpdateFundingRate) {
-            UpdateFundingRate memory txs = abi.decode(data[5:], (UpdateFundingRate));
-            if (lastFundingRateUpdate >= txs.lastFundingRateUpdateSequenceNumber) {
+            (uint8 productIndex, int128 priceDiff, uint128 lastFundingRateUpdateSequenceNumber) =
+                abi.decode(data[5:], (uint8, int128, uint128));
+            if (lastFundingRateUpdate >= lastFundingRateUpdateSequenceNumber) {
                 revert Errors.Exchange_InvalidFundingRateSequenceNumber(
-                    txs.lastFundingRateUpdateSequenceNumber, lastFundingRateUpdate
+                    lastFundingRateUpdateSequenceNumber, lastFundingRateUpdate
                 );
             }
-            int256 cumulativeFunding = perpEngine.updateFundingRate(txs.productIndex, txs.priceDiff);
-            lastFundingRateUpdate = txs.lastFundingRateUpdateSequenceNumber;
-            emit FundingRate(txs.productIndex, txs.priceDiff, cumulativeFunding, transactionId);
+            int256 cumulativeFunding = perpEngine.updateFundingRate(productIndex, priceDiff);
+            lastFundingRateUpdate = lastFundingRateUpdateSequenceNumber;
+            emit UpdateFundingRate(productIndex, priceDiff, cumulativeFunding);
         } else if (operationType == OperationType.CoverLossByInsuranceFund) {
-            address account = abi.decode(data[5:], (address));
-            clearingService.coverLossWithInsuranceFund(spotEngine, book.getCollateralToken(), account);
+            (address account, uint256 amount) = abi.decode(data[5:], (address, uint256));
+            clearingService.coverLossWithInsuranceFund(account, amount);
         } else if (operationType == OperationType.AddSigningWallet) {
             AddSigningWallet memory txs = abi.decode(data[5:], (AddSigningWallet));
             _addSigningWallet(txs.sender, txs.signer, txs.message, txs.nonce, txs.walletSignature, txs.signerSignature);
-            emit SigningWallet(txs.sender, txs.signer, transactionId);
         } else if (operationType == OperationType.Withdraw) {
             Withdraw memory txs = abi.decode(data[5:], (Withdraw));
             if (!canWithdraw) {
@@ -484,24 +483,32 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             if (txs.withdrawalSequencerFee > MAX_WITHDRAWAL_FEE) {
                 revert Errors.Exchange_ExceededMaxWithdrawFee(txs.withdrawalSequencerFee, MAX_WITHDRAWAL_FEE);
             }
+            if (isWithdrawNonceUsed[txs.sender][txs.nonce]) {
+                revert Errors.Exchange_Withdraw_NonceUsed(txs.sender, txs.nonce);
+            }
+            isWithdrawNonceUsed[txs.sender][txs.nonce] = true;
+
             bytes32 digest =
                 _hashTypedDataV4(keccak256(abi.encode(WITHDRAW_TYPEHASH, txs.sender, txs.token, txs.amount, txs.nonce)));
-            _verifySignature(txs.sender, digest, txs.signature);
-            _verifyWithdrawNonce(txs.sender, txs.nonce);
+            if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(txs.sender, digest, txs.signature)) {
+                emit WithdrawFailed(txs.sender, txs.nonce, 0, 0);
+                return;
+            }
+
             int256 currentBalance = balanceOf(txs.sender, txs.token);
             if (txs.amount < MIN_WITHDRAW_AMOUNT || currentBalance < int256(int128(txs.amount))) {
-                isWithdrawSuccess[txs.sender][txs.nonce] = false;
-                emit WithdrawRejected(txs.sender, txs.nonce, txs.amount, currentBalance);
+                emit WithdrawFailed(txs.sender, txs.nonce, txs.amount, currentBalance);
+                return;
             } else {
                 clearingService.withdraw(txs.sender, txs.amount, txs.token, spotEngine);
                 IERC20Extend product = IERC20Extend(txs.token);
-                uint256 amountToTransfer = _convertToRawAmount(txs.token, txs.amount - txs.withdrawalSequencerFee);
+                uint256 netAmount = txs.amount - txs.withdrawalSequencerFee;
+                uint256 amountToTransfer = netAmount.convertFromScale(txs.token);
                 _sequencerFee += int256(int128(txs.withdrawalSequencerFee));
                 product.safeTransfer(txs.sender, amountToTransfer);
                 int256 afterBalance = balanceOf(txs.sender, txs.token);
-                isWithdrawSuccess[txs.sender][txs.nonce] = true;
-                emit WithdrawInfo(
-                    txs.token, txs.sender, txs.amount, uint256(afterBalance), txs.nonce, txs.withdrawalSequencerFee
+                emit WithdrawSucceeded(
+                    txs.token, txs.sender, txs.nonce, txs.amount, uint256(afterBalance), txs.withdrawalSequencerFee
                 );
             }
         } else {
@@ -510,7 +517,9 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     /// @dev Parse encoded data to order
-    function _parseDataToOrder(bytes calldata data)
+    function _parseDataToOrder(
+        bytes calldata data
+    )
         internal
         pure
         returns (LibOrder.Order memory, bytes memory signature, address signer, bool isLiquidation, int128 matchFee)
@@ -558,13 +567,6 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         );
     }
 
-    /// @dev Convert a standard amount (18 decimals) to a normal amount (token decimals)
-    function _convertToRawAmount(address token, uint128 amount) internal view returns (uint128) {
-        IERC20Extend product = IERC20Extend(token);
-        uint256 rawAmount = (amount * 10 ** product.decimals()) / 1e18;
-        return uint128(rawAmount);
-    }
-
     /// @dev Validates and authorizes a signer to sign on behalf of a sender.
     /// Supports adding a signing wallet for both EOA and smart contract.
     /// Smart contract signature validation follows ERC1271 standards.
@@ -588,7 +590,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         bytes32 registerHash = _hashTypedDataV4(
             keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(authorizedMsg)), nonce))
         );
-        if (!SignatureChecker.isValidSignatureNow(sender, registerHash, senderSignature)) {
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(sender, registerHash, senderSignature)) {
             revert Errors.Exchange_InvalidSignature(sender);
         }
 
@@ -597,9 +599,9 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         _verifySignature(signer, signKeyHash, signerSignature);
 
         _signingWallets[sender][signer] = true;
-        usedNonces[sender][nonce] = true;
+        isRegisterSignerNonceUsed[sender][nonce] = true;
 
-        emit RegisterSigningWallet(sender, signer, nonce);
+        emit RegisterSigner(sender, signer, nonce);
     }
 
     /// @dev Validates a signature
@@ -612,25 +614,16 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
 
     /// @dev Checks if a nonce is used for adding a signing wallet, revert if nonce is used
     function _verifySigningNonce(address sender, uint64 nonce) internal view {
-        if (usedNonces[sender][nonce]) {
+        if (isRegisterSignerNonceUsed[sender][nonce]) {
             revert Errors.Exchange_AddSigningWallet_UsedNonce(sender, nonce);
-        }
-    }
-
-    /// @dev Checks if a nonce is used for withdraw, revert if nonce is used
-    function _verifyWithdrawNonce(address sender, uint64 nonce) internal view {
-        if (isWithdrawSuccess[sender][nonce]) {
-            revert Errors.Exchange_Withdraw_NonceUsed(sender, nonce);
         }
     }
 
     /// @dev Parses referral data from encoded data
     /// @param data Encoded data
-    function _parseReferralData(bytes calldata data)
-        internal
-        pure
-        returns (address referrer, uint16 referrerRebateRate)
-    {
+    function _parseReferralData(
+        bytes calldata data
+    ) internal pure returns (address referrer, uint16 referrerRebateRate) {
         // 20 bytes is referrer
         // 2 bytes is referrer rebate rate
         referrer = address(bytes20(data[0:20]));
@@ -670,82 +663,5 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         emit RebateMaker(maker, uint128(rebate));
 
         return 0;
-    }
-
-    /*//////////////////////////////////////////////////////////////////////////
-                                DEVELOPMENT ONLY
-    //////////////////////////////////////////////////////////////////////////*/
-    function depositTestToken(
-        address user,
-        address tokenAddress,
-        uint256 amount
-    ) external supportedToken(tokenAddress) onlyGeneralAdmin {
-        _depositTestToken(user, tokenAddress, amount);
-    }
-
-    function depositTestTokenBatch(
-        address[] memory users,
-        address tokenAddress,
-        uint256 amount
-    ) external supportedToken(tokenAddress) onlyGeneralAdmin {
-        for (uint256 index = 0; index < users.length; ++index) {
-            _depositTestToken(users[index], tokenAddress, amount);
-        }
-    }
-
-    function _depositTestToken(address user, address tokenAddress, uint256 amount) private {
-        require(amount > 0, "Exchange: Zero amount");
-        require(canDeposit, "Exchange: Disabled deposit");
-
-        clearingService.deposit(user, amount, tokenAddress, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(tokenAddress, user);
-
-        _userWallets.add(user); // store user wallet
-
-        emit Deposit(tokenAddress, user, amount, uint256(currentBalance));
-    }
-
-    function resetAccounts(
-        address[] calldata users,
-        address spotToken,
-        uint256 totalProducts
-    ) external onlyGeneralAdmin {
-        uint8[] memory productIds = new uint8[](totalProducts);
-        for (uint8 i = 0; i < totalProducts; ++i) {
-            productIds[i] = i + 1;
-        }
-
-        uint256 length = users.length;
-        for (uint256 index = 0; index < length; ++index) {
-            address user = users[index];
-            Spot(address(spotEngine)).resetBalance(user, spotToken);
-            Perp(address(perpEngine)).resetBalance(productIds, user);
-            _userWallets.remove(user);
-        }
-    }
-
-    function resetMarketInfo(uint256 totalProducts) external onlyGeneralAdmin {
-        uint8[] memory productIds = new uint8[](totalProducts);
-        for (uint8 i = 0; i < totalProducts; ++i) {
-            productIds[i] = i + 1;
-        }
-
-        Perp(address(perpEngine)).resetFundingRate(productIds);
-        executedTransactionCounter = 0;
-        lastFundingRateUpdate = 0;
-        _lastResetBlockNumber = block.number;
-    }
-
-    function getUserWallets() external view returns (address[] memory) {
-        uint128 length = uint128(_userWallets.length());
-        address[] memory userWalletList = new address[](length);
-        for (uint256 index = 0; index < length; ++index) {
-            userWalletList[index] = _userWallets.at(index);
-        }
-        return userWalletList;
-    }
-
-    function lastResetBlockNumber() external view returns (uint256) {
-        return _lastResetBlockNumber;
     }
 }

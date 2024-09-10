@@ -3,9 +3,9 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {Test} from "forge-std/Test.sol";
 
-import {ISpot, Spot} from "src/Spot.sol";
-import {Access} from "src/access/Access.sol";
-import {Errors} from "src/lib/Errors.sol";
+import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Access} from "contracts/exchange/access/Access.sol";
+import {Errors} from "contracts/exchange/lib/Errors.sol";
 
 contract SpotEngineTest is Test {
     address private exchange = makeAddr("exchange");
@@ -18,6 +18,10 @@ contract SpotEngineTest is Test {
     function setUp() public {
         access = new Access();
         access.initialize(address(this));
+
+        // migrate new admin role
+        access.migrateAdmin();
+
         access.setExchange(exchange);
         access.setClearingService(clearingService);
         access.setOrderBook(orderBook);
