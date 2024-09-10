@@ -51,7 +51,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     /// @inheritdoc IBSX1000x
     mapping(address account => mapping(uint256 nonce => bool)) public isWithdrawNonceUsed;
 
-    mapping(address account => Balance) private _balance;
+    mapping(address account => Balance balance) private _balance;
 
     mapping(address account => mapping(uint256 nonce => Position)) private _position;
 
@@ -68,12 +68,10 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         _;
     }
 
-    function initialize(
-        string memory name,
-        string memory version,
-        address _access,
-        address _collateralToken
-    ) external initializer {
+    function initialize(string memory name, string memory version, address _access, address _collateralToken)
+        external
+        initializer
+    {
         __EIP712_init(name, version);
         if (_access == address(0) || _collateralToken == address(0)) {
             revert Errors.ZeroAddress();
@@ -139,13 +137,10 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @inheritdoc IBSX1000x
-    function withdraw(
-        address account,
-        uint256 amount,
-        uint256 fee,
-        uint256 nonce,
-        bytes memory signature
-    ) public onlyRole(access.GENERAL_ROLE()) {
+    function withdraw(address account, uint256 amount, uint256 fee, uint256 nonce, bytes memory signature)
+        public
+        onlyRole(access.GENERAL_ROLE())
+    {
         uint256 netAmount = amount - fee;
         uint256 amountToTransfer = netAmount.convertFromScale(address(collateralToken));
         if (amount == 0 || amountToTransfer == 0) revert ZeroAmount();
@@ -184,11 +179,10 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @inheritdoc IBSX1000x
-    function openPosition(
-        Order calldata order,
-        uint256 credit,
-        bytes memory signature
-    ) public onlyRole(access.BSX1000_OPERATOR_ROLE()) {
+    function openPosition(Order calldata order, uint256 credit, bytes memory signature)
+        public
+        onlyRole(access.BSX1000_OPERATOR_ROLE())
+    {
         bytes32 orderHash = _hashTypedDataV4(
             keccak256(
                 abi.encode(

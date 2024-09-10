@@ -82,11 +82,10 @@ contract UniversalSigValidator {
         return ECDSA.recover(_hash, _signature) == _signer;
     }
 
-    function isValidSigWithSideEffects(
-        address _signer,
-        bytes32 _hash,
-        bytes calldata _signature
-    ) external returns (bool) {
+    function isValidSigWithSideEffects(address _signer, bytes32 _hash, bytes calldata _signature)
+        external
+        returns (bool)
+    {
         return this.isValidSigImpl(_signer, _hash, _signature, true, false);
     }
 

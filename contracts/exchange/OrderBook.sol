@@ -225,13 +225,10 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
         feeCollection.perpFeeCollection += fee.maker + fee.taker - int128(fee.referralRebate);
     }
 
-    function _settleBalance(
-        uint8 _productIndex,
-        address _account,
-        int128 _matchSize,
-        int128 _quote,
-        uint128 _price
-    ) internal returns (int128, int128) {
+    function _settleBalance(uint8 _productIndex, address _account, int128 _matchSize, int128 _quote, uint128 _price)
+        internal
+        returns (int128, int128)
+    {
         ISpot.AccountDelta[] memory accountDeltas = new ISpot.AccountDelta[](1);
         IPerp.Balance memory balance = perpEngine.getOpenPosition(_account, _productIndex);
         IPerp.FundingRate memory fundingRate = perpEngine.getFundingRate(_productIndex);
@@ -273,12 +270,11 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
     /// @param amount Amount of product token
     /// @param quoteAmount Amount of quote
     /// @return Account delta
-    function _createAccountDelta(
-        uint8 productIndex,
-        address account,
-        int128 amount,
-        int128 quoteAmount
-    ) internal pure returns (IPerp.AccountDelta memory) {
+    function _createAccountDelta(uint8 productIndex, address account, int128 amount, int128 quoteAmount)
+        internal
+        pure
+        returns (IPerp.AccountDelta memory)
+    {
         return
             IPerp.AccountDelta({productIndex: productIndex, account: account, amount: amount, quoteAmount: quoteAmount});
     }

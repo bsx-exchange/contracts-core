@@ -19,11 +19,12 @@ import {ISpot} from "./interfaces/ISpot.sol";
 import {IERC20Extend} from "./interfaces/external/IERC20Extend.sol";
 import {IERC3009Minimal} from "./interfaces/external/IERC3009Minimal.sol";
 import {IUniversalSigValidator} from "./interfaces/external/IUniversalSigValidator.sol";
+import {IWETH9} from "./interfaces/external/IWETH9.sol";
 import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT, NAME, VERSION} from "./share/Constants.sol";
+import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT, NAME, VERSION, WETH9} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
 
 /// @title Exchange contract
@@ -158,11 +159,24 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     ///@inheritdoc IExchange
-    function depositRaw(
-        address recipient,
-        address tokenAddress,
-        uint128 rawAmount
-    ) external supportedToken(tokenAddress) {
+    function depositETH() external payable {
+        if (!canDeposit) {
+            revert Errors.Exchange_DisabledDeposit();
+        }
+        uint256 amount = msg.value;
+        if (amount == 0) revert Errors.Exchange_ZeroAmount();
+
+        IWETH9(WETH9).deposit{value: amount}();
+        clearingService.deposit(msg.sender, amount, WETH9, spotEngine);
+        int256 currentBalance = spotEngine.getBalance(WETH9, msg.sender);
+        emit Deposit(WETH9, msg.sender, amount, uint256(currentBalance));
+    }
+
+    ///@inheritdoc IExchange
+    function depositRaw(address recipient, address tokenAddress, uint128 rawAmount)
+        external
+        supportedToken(tokenAddress)
+    {
         if (!canDeposit) {
             revert Errors.Exchange_DisabledDeposit();
         }
@@ -280,10 +294,10 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     /// @inheritdoc IExchange
-    function unregisterSigningWallet(
-        address account,
-        address signer
-    ) external onlyRole(access.SIGNER_OPERATOR_ROLE()) {
+    function unregisterSigningWallet(address account, address signer)
+        external
+        onlyRole(access.SIGNER_OPERATOR_ROLE())
+    {
         _signingWallets[account][signer] = false;
     }
 
@@ -517,9 +531,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     /// @dev Parse encoded data to order
-    function _parseDataToOrder(
-        bytes calldata data
-    )
+    function _parseDataToOrder(bytes calldata data)
         internal
         pure
         returns (LibOrder.Order memory, bytes memory signature, address signer, bool isLiquidation, int128 matchFee)
@@ -621,9 +633,11 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
 
     /// @dev Parses referral data from encoded data
     /// @param data Encoded data
-    function _parseReferralData(
-        bytes calldata data
-    ) internal pure returns (address referrer, uint16 referrerRebateRate) {
+    function _parseReferralData(bytes calldata data)
+        internal
+        pure
+        returns (address referrer, uint16 referrerRebateRate)
+    {
         // 20 bytes is referrer
         // 2 bytes is referrer rebate rate
         referrer = address(bytes20(data[0:20]));

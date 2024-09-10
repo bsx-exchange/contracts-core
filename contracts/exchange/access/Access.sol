@@ -30,7 +30,7 @@ contract Access is Initializable, AccessControlUpgradeable {
     address private perp;
     address private bsx1000;
 
-    mapping(bytes32 => EnumerableSet.AddressSet) private roles;
+    mapping(bytes32 role => EnumerableSet.AddressSet accounts) private roles;
 
     function initialize(address adminGeneral) public initializer {
         if (adminGeneral == address(0)) {

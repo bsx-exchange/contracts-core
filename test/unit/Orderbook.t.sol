@@ -587,13 +587,11 @@ contract OrderbookTest is Test {
         orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
     }
 
-    function _createLongOrder(
-        address account,
-        uint128 size,
-        uint128 price,
-        uint64 nonce,
-        bool isLiquidation
-    ) internal view returns (LibOrder.SignedOrder memory signedOrder, bytes32 orderHash) {
+    function _createLongOrder(address account, uint128 size, uint128 price, uint64 nonce, bool isLiquidation)
+        internal
+        view
+        returns (LibOrder.SignedOrder memory signedOrder, bytes32 orderHash)
+    {
         LibOrder.Order memory order = LibOrder.Order({
             sender: account,
             size: size,
@@ -606,13 +604,11 @@ contract OrderbookTest is Test {
         orderHash = keccak256(abi.encode(account, size, price, nonce, OrderSide.BUY));
     }
 
-    function _createShortOrder(
-        address account,
-        uint128 size,
-        uint128 price,
-        uint64 nonce,
-        bool isLiquidation
-    ) internal view returns (LibOrder.SignedOrder memory signedOrder, bytes32 orderHash) {
+    function _createShortOrder(address account, uint128 size, uint128 price, uint64 nonce, bool isLiquidation)
+        internal
+        view
+        returns (LibOrder.SignedOrder memory signedOrder, bytes32 orderHash)
+    {
         LibOrder.Order memory order = LibOrder.Order({
             sender: account,
             size: size,

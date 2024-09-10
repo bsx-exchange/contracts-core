@@ -47,10 +47,11 @@ library MathHelper {
         return originalAmount;
     }
 
-    function roundDownAndConvertFromScale(
-        uint256 scaledAmount,
-        address token
-    ) internal view returns (uint256, uint256) {
+    function roundDownAndConvertFromScale(uint256 scaledAmount, address token)
+        internal
+        view
+        returns (uint256, uint256)
+    {
         IERC20Extend product = IERC20Extend(token);
         uint8 decimals = product.decimals();
         uint256 originalAmount = _convertFromScale(scaledAmount, decimals);

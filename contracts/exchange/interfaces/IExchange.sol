@@ -151,6 +151,9 @@ interface IExchange {
     /// @param amount Scaled amount of token, 18 decimals
     function deposit(address recipient, address tokenAddress, uint128 amount) external;
 
+    /// @notice Deposits ETH to the exchange
+    function depositETH() external payable;
+
     /// @notice Deposits token with raw amount to the exchange
     /// @dev Emits a {Deposit} event
     /// @param recipient Recipient address

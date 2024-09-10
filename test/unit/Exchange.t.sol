@@ -11,6 +11,7 @@ import {ERC1271} from "../mock/ERC1271.sol";
 import {ERC20MissingReturn} from "../mock/ERC20MissingReturn.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
+import {WETH9Mock} from "../mock/WETH9.sol";
 
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
@@ -23,7 +24,7 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
-import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT} from "contracts/exchange/share/Constants.sol";
+import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT, WETH9} from "contracts/exchange/share/Constants.sol";
 import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
@@ -400,6 +401,46 @@ contract ExchangeTest is Test {
 
         vm.expectRevert(Errors.Exchange_DisabledDeposit.selector);
         exchange.deposit(recipient, address(collateralToken), 100);
+    }
+
+    function test_depositETH() public {
+        bytes memory code = address(new WETH9Mock()).code;
+        vm.etch(WETH9, code);
+
+        address account = makeAddr("account");
+        uint128 totalAmount;
+
+        vm.deal(account, 100 ether);
+        vm.startPrank(account);
+
+        for (uint128 i = 1; i < 5; i++) {
+            uint128 amount = i * 1e18;
+
+            totalAmount += amount;
+            vm.expectEmit(address(exchange));
+            emit IExchange.Deposit(WETH9, account, amount, totalAmount);
+            exchange.depositETH{value: amount}();
+
+            assertEq(exchange.balanceOf(account, WETH9), int128(totalAmount));
+            assertEq(spotEngine.getBalance(WETH9, account), int128(totalAmount));
+            assertEq(spotEngine.getTotalBalance(WETH9), totalAmount);
+            assertEq(WETH9Mock(payable(WETH9)).balanceOf(address(exchange)), totalAmount);
+        }
+    }
+
+    function test_depositETH_revertsIfDisabledDeposit() public {
+        vm.prank(sequencer);
+        exchange.setCanDeposit(false);
+
+        vm.expectRevert(Errors.Exchange_DisabledDeposit.selector);
+        exchange.depositETH{value: 10}();
+    }
+
+    function test_depositETH_revertsIfZeroAmount() public {
+        vm.prank(sequencer);
+
+        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
+        exchange.depositETH();
     }
 
     function test_depositRaw() public {
@@ -2774,12 +2815,11 @@ contract ExchangeTest is Test {
         exchange.processBatch(data);
     }
 
-    function _encodeOrder(
-        uint256 signerKey,
-        LibOrder.Order memory order,
-        bool isLiquidated,
-        int128 tradingFee
-    ) private view returns (bytes memory) {
+    function _encodeOrder(uint256 signerKey, LibOrder.Order memory order, bool isLiquidated, int128 tradingFee)
+        private
+        view
+        returns (bytes memory)
+    {
         address signer = vm.addr(signerKey);
         return _encodeOrderWithSigner(signer, signerKey, order, isLiquidated, tradingFee);
     }
@@ -2819,11 +2859,11 @@ contract ExchangeTest is Test {
         );
     }
 
-    function _encodeLiquidatedOrder(
-        LibOrder.Order memory order,
-        bool isLiquidated,
-        int128 tradingFee
-    ) private pure returns (bytes memory) {
+    function _encodeLiquidatedOrder(LibOrder.Order memory order, bool isLiquidated, int128 tradingFee)
+        private
+        pure
+        returns (bytes memory)
+    {
         address mockSigner = address(0);
         bytes memory mockSignature = abi.encodePacked(bytes32(0), bytes32(0), uint8(0));
         return abi.encodePacked(
@@ -2851,10 +2891,11 @@ contract ExchangeTest is Test {
         ERC20Simple(token).approve(address(exchange), rawAmount);
     }
 
-    function _encodeDataToOperation(
-        IExchange.OperationType operationType,
-        bytes memory data
-    ) private view returns (bytes memory) {
+    function _encodeDataToOperation(IExchange.OperationType operationType, bytes memory data)
+        private
+        view
+        returns (bytes memory)
+    {
         uint32 transactionId = exchange.executedTransactionCounter();
         return abi.encodePacked(operationType, transactionId, data);
     }
