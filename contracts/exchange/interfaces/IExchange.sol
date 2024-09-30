@@ -73,7 +73,9 @@ interface IExchange {
     event WithdrawInsuranceFund(uint256 withdrawAmount, uint256 insuranceFund);
 
     event ClaimTradingFees(address indexed claimer, uint256 amount);
-    event ClaimSequencerFees(address indexed claimer, uint256 amount);
+
+    /// @notice Emitted when sequencer fees are claimed
+    event ClaimSequencerFees(address indexed claimer, address indexed token, uint256 amount);
 
     /// @notice deprecated, use `WithdrawSucceeded` instead
     event WithdrawInfo(
@@ -140,30 +142,27 @@ interface IExchange {
 
     /// @notice Deposits token with scaled amount to the exchange
     /// @dev Emits a {Deposit} event
-    /// @param tokenAddress Token address
+    /// @param token Token address
     /// @param amount Scaled amount of token, 18 decimals
-    function deposit(address tokenAddress, uint128 amount) external;
+    function deposit(address token, uint128 amount) external payable;
 
     /// @notice Deposits token with recipient with scaled amount to the exchange
     /// @dev Emits a {Deposit} event
     /// @param recipient Recipient address
-    /// @param tokenAddress Token address
+    /// @param token Token address
     /// @param amount Scaled amount of token, 18 decimals
-    function deposit(address recipient, address tokenAddress, uint128 amount) external;
-
-    /// @notice Deposits ETH to the exchange
-    function depositETH() external payable;
+    function deposit(address recipient, address token, uint128 amount) external payable;
 
     /// @notice Deposits token with raw amount to the exchange
     /// @dev Emits a {Deposit} event
     /// @param recipient Recipient address
     /// @param token Token address
     /// @param rawAmount Raw amount of token (in token decimals)
-    function depositRaw(address recipient, address token, uint128 rawAmount) external;
+    function depositRaw(address recipient, address token, uint128 rawAmount) external payable;
 
     /// @notice Deposits token to the exchange with authorization, following EIP-3009
     /// @dev Emits a {Deposit} event
-    /// @param tokenAddress  Token address
+    /// @param token  Token address
     /// @param depositor     Depositor address
     /// @param amount        Scaled amount of token, 18 decimals
     /// @param validAfter    The time after which this is valid (unix time)
@@ -171,7 +170,7 @@ interface IExchange {
     /// @param nonce         Unique nonce
     /// @param signature     Signature bytes signed by an EOA wallet or a contract wallet
     function depositWithAuthorization(
-        address tokenAddress,
+        address token,
         address depositor,
         uint128 amount,
         uint256 validAfter,
@@ -234,7 +233,8 @@ interface IExchange {
     function getTradingFees() external view returns (int128);
 
     /// @notice Gets collected sequencer fees
-    function getSequencerFees() external view returns (int256);
+    /// @param token Token address
+    function getSequencerFees(address token) external view returns (uint256);
 
     /// @dev Checks whether the signer is authorized to sign on behalf of the sender
     function isSigningWallet(address sender, address signer) external view returns (bool);

@@ -24,7 +24,15 @@ import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT, NAME, VERSION, WETH9} from "./share/Constants.sol";
+import {
+    MAX_REBATE_RATE,
+    MAX_WITHDRAWAL_FEE,
+    MIN_WITHDRAW_AMOUNT,
+    NAME,
+    NATIVE_ETH,
+    VERSION,
+    WETH9
+} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
 
 /// @title Exchange contract
@@ -37,6 +45,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     using SafeERC20 for IERC20Extend;
     using Percentage for uint128;
     using MathHelper for uint256;
+    using MathHelper for int256;
 
     IClearingService public clearingService;
     ISpot public spotEngine;
@@ -46,7 +55,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
 
     EnumerableSet.AddressSet private supportedTokens;
     mapping(address account => mapping(address signer => bool isAuthorized)) private _signingWallets;
-    mapping(uint256 requestId => bytes info) private _withdrawalInfo; // deprecated
+    mapping(address token => uint256 amount) private _collectedFee;
     mapping(address account => mapping(uint64 registerSignerNonce => bool used)) public isRegisterSignerNonceUsed;
 
     uint256 private _withdrawalRequestIDCounter; // deprecated
@@ -120,6 +129,14 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         _;
     }
 
+    function migrate() external onlyRole(access.GENERAL_ROLE()) {
+        require(_sequencerFee != 0);
+
+        address underlyingAsset = book.getCollateralToken();
+        _collectedFee[underlyingAsset] = uint256(_sequencerFee);
+        _sequencerFee = 0;
+    }
+
     ///@inheritdoc IExchange
     function addSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
         bool success = supportedTokens.add(token);
@@ -139,80 +156,59 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     ///@inheritdoc IExchange
-    function deposit(address tokenAddress, uint128 amount) external {
-        deposit(msg.sender, tokenAddress, amount);
+    function deposit(address token, uint128 amount) external payable {
+        deposit(msg.sender, token, amount);
     }
 
     ///@inheritdoc IExchange
-    function deposit(address recipient, address tokenAddress, uint128 amount) public supportedToken(tokenAddress) {
-        if (!canDeposit) {
-            revert Errors.Exchange_DisabledDeposit();
-        }
-        IERC20Extend token = IERC20Extend(tokenAddress);
-        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(tokenAddress);
-        if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
-
-        token.safeTransferFrom(msg.sender, address(this), amountToTransfer);
-        clearingService.deposit(recipient, roundDownAmount, tokenAddress, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(tokenAddress, recipient);
-        emit Deposit(tokenAddress, recipient, roundDownAmount, uint256(currentBalance));
-    }
-
-    ///@inheritdoc IExchange
-    function depositETH() external payable {
-        if (!canDeposit) {
-            revert Errors.Exchange_DisabledDeposit();
-        }
-        uint256 amount = msg.value;
+    function deposit(address recipient, address token, uint128 amount) public payable supportedToken(token) {
+        if (!canDeposit) revert Errors.Exchange_DisabledDeposit();
         if (amount == 0) revert Errors.Exchange_ZeroAmount();
 
-        IWETH9(WETH9).deposit{value: amount}();
-        clearingService.deposit(msg.sender, amount, WETH9, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(WETH9, msg.sender);
-        emit Deposit(WETH9, msg.sender, amount, uint256(currentBalance));
+        if (token == NATIVE_ETH) {
+            token = WETH9;
+            IWETH9(token).deposit{value: amount}();
+        } else {
+            (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(token);
+            if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
+            amount = uint128(roundDownAmount);
+            IERC20Extend(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
+        }
+
+        clearingService.deposit(recipient, amount, token, spotEngine);
+        int256 currentBalance = balanceOf(recipient, token);
+        emit Deposit(token, recipient, amount, uint256(currentBalance));
     }
 
     ///@inheritdoc IExchange
-    function depositRaw(address recipient, address tokenAddress, uint128 rawAmount)
-        external
-        supportedToken(tokenAddress)
-    {
-        if (!canDeposit) {
-            revert Errors.Exchange_DisabledDeposit();
-        }
-        IERC20Extend token = IERC20Extend(tokenAddress);
-        uint256 scaledAmount = uint256(rawAmount).convertToScale(tokenAddress);
-        if (rawAmount == 0 || scaledAmount == 0) revert Errors.Exchange_ZeroAmount();
-
-        token.safeTransferFrom(msg.sender, address(this), rawAmount);
-        clearingService.deposit(recipient, scaledAmount, tokenAddress, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(tokenAddress, recipient);
-        emit Deposit(tokenAddress, recipient, scaledAmount, uint256(currentBalance));
+    function depositRaw(address recipient, address token, uint128 rawAmount) external payable supportedToken(token) {
+        uint256 amount = token == NATIVE_ETH ? rawAmount : uint256(rawAmount).convertToScale(token);
+        deposit(recipient, token, amount.safeUInt128());
     }
 
     //// @inheritdoc IExchange
     function depositWithAuthorization(
-        address tokenAddress,
+        address token,
         address depositor,
         uint128 amount,
         uint256 validAfter,
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external supportedToken(tokenAddress) {
+    ) external supportedToken(token) {
         if (!canDeposit) {
             revert Errors.Exchange_DisabledDeposit();
         }
 
-        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(tokenAddress);
+        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
-        IERC3009Minimal(tokenAddress).receiveWithAuthorization(
+        IERC3009Minimal(token).receiveWithAuthorization(
             depositor, address(this), amountToTransfer, validAfter, validBefore, nonce, signature
         );
-        clearingService.deposit(depositor, roundDownAmount, tokenAddress, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(tokenAddress, depositor);
-        emit Deposit(tokenAddress, depositor, roundDownAmount, uint256(currentBalance));
+        clearingService.deposit(depositor, roundDownAmount, token, spotEngine);
+        int256 currentBalance = spotEngine.getBalance(token, depositor);
+        emit Deposit(token, depositor, roundDownAmount, uint256(currentBalance));
     }
 
     /// @inheritdoc IExchange
@@ -252,13 +248,20 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
 
     /// @inheritdoc IExchange
     function claimSequencerFees() external onlyRole(access.GENERAL_ROLE()) {
-        address token = book.getCollateralToken();
-        uint256 totalFee = uint256(_sequencerFee + book.claimSequencerFees());
-        _sequencerFee = 0;
+        address underlyingAsset = book.getCollateralToken();
 
-        uint256 amountToTransfer = totalFee.convertFromScale(token);
-        IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
-        emit ClaimSequencerFees(msg.sender, totalFee);
+        for (uint256 i = 0; i < supportedTokens.length(); ++i) {
+            address token = supportedTokens.at(i);
+            uint256 totalFee = _collectedFee[token];
+            if (token == underlyingAsset) {
+                totalFee += book.claimSequencerFees().safeUInt256();
+            }
+            _collectedFee[token] = 0;
+
+            uint256 amountToTransfer = totalFee.convertFromScale(token);
+            IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
+            emit ClaimSequencerFees(msg.sender, token, totalFee);
+        }
     }
 
     ///@inheritdoc IExchange
@@ -327,8 +330,14 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     /// @inheritdoc IExchange
-    function getSequencerFees() external view returns (int256) {
-        return _sequencerFee + book.getSequencerFees();
+    function getSequencerFees(address token) external view returns (uint256) {
+        address underlyingAsset = book.getCollateralToken();
+        uint256 fees = _collectedFee[token];
+        if (token == underlyingAsset) {
+            fees += book.getSequencerFees().safeUInt256();
+        }
+
+        return fees;
     }
 
     /// @inheritdoc IExchange
@@ -518,7 +527,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
                 IERC20Extend product = IERC20Extend(txs.token);
                 uint256 netAmount = txs.amount - txs.withdrawalSequencerFee;
                 uint256 amountToTransfer = netAmount.convertFromScale(txs.token);
-                _sequencerFee += int256(int128(txs.withdrawalSequencerFee));
+                _collectedFee[txs.token] += txs.withdrawalSequencerFee;
                 product.safeTransfer(txs.sender, amountToTransfer);
                 int256 afterBalance = balanceOf(txs.sender, txs.token);
                 emit WithdrawSucceeded(

@@ -24,7 +24,13 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
-import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, MIN_WITHDRAW_AMOUNT, WETH9} from "contracts/exchange/share/Constants.sol";
+import {
+    MAX_REBATE_RATE,
+    MAX_WITHDRAWAL_FEE,
+    MIN_WITHDRAW_AMOUNT,
+    NATIVE_ETH,
+    WETH9
+} from "contracts/exchange/share/Constants.sol";
 import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
@@ -304,6 +310,28 @@ contract ExchangeTest is Test {
         assertEq(erc20MissingReturn.balanceOf(address(exchange)), amount.convertFrom18D(tokenDecimals));
     }
 
+    function test_deposit_withNativeETH() public {
+        bytes memory code = address(new WETH9Mock()).code;
+        vm.etch(WETH9, code);
+
+        vm.prank(sequencer);
+        exchange.addSupportedToken(NATIVE_ETH);
+
+        address account = makeAddr("account");
+        uint128 amount = 5 ether;
+        vm.deal(account, amount);
+
+        vm.prank(account);
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(WETH9, account, amount, amount);
+        exchange.deposit{value: amount}(NATIVE_ETH, amount);
+
+        assertEq(exchange.balanceOf(account, WETH9), int128(amount));
+        assertEq(spotEngine.getBalance(WETH9, account), int128(amount));
+        assertEq(spotEngine.getTotalBalance(WETH9), amount);
+        assertEq(ERC20Simple(WETH9).balanceOf(address(exchange)), amount);
+    }
+
     function test_deposit_revertsIfZeroAmount() public {
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
         exchange.deposit(address(collateralToken), 0);
@@ -403,46 +431,6 @@ contract ExchangeTest is Test {
         exchange.deposit(recipient, address(collateralToken), 100);
     }
 
-    function test_depositETH() public {
-        bytes memory code = address(new WETH9Mock()).code;
-        vm.etch(WETH9, code);
-
-        address account = makeAddr("account");
-        uint128 totalAmount;
-
-        vm.deal(account, 100 ether);
-        vm.startPrank(account);
-
-        for (uint128 i = 1; i < 5; i++) {
-            uint128 amount = i * 1e18;
-
-            totalAmount += amount;
-            vm.expectEmit(address(exchange));
-            emit IExchange.Deposit(WETH9, account, amount, totalAmount);
-            exchange.depositETH{value: amount}();
-
-            assertEq(exchange.balanceOf(account, WETH9), int128(totalAmount));
-            assertEq(spotEngine.getBalance(WETH9, account), int128(totalAmount));
-            assertEq(spotEngine.getTotalBalance(WETH9), totalAmount);
-            assertEq(WETH9Mock(payable(WETH9)).balanceOf(address(exchange)), totalAmount);
-        }
-    }
-
-    function test_depositETH_revertsIfDisabledDeposit() public {
-        vm.prank(sequencer);
-        exchange.setCanDeposit(false);
-
-        vm.expectRevert(Errors.Exchange_DisabledDeposit.selector);
-        exchange.depositETH{value: 10}();
-    }
-
-    function test_depositETH_revertsIfZeroAmount() public {
-        vm.prank(sequencer);
-
-        vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
-        exchange.depositETH();
-    }
-
     function test_depositRaw() public {
         address account = makeAddr("account");
         uint128 totalAmount;
@@ -494,6 +482,28 @@ contract ExchangeTest is Test {
 
         assertEq(erc20MissingReturn.balanceOf(account), 0);
         assertEq(erc20MissingReturn.balanceOf(address(exchange)), amount.convertFrom18D(tokenDecimals));
+    }
+
+    function test_depositRaw_withNativeETH() public {
+        bytes memory code = address(new WETH9Mock()).code;
+        vm.etch(WETH9, code);
+
+        vm.prank(sequencer);
+        exchange.addSupportedToken(NATIVE_ETH);
+
+        address account = makeAddr("account");
+        uint128 amount = 5 ether;
+        vm.deal(account, amount);
+
+        vm.prank(account);
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(WETH9, account, amount, amount);
+        exchange.depositRaw{value: amount}(account, NATIVE_ETH, amount);
+
+        assertEq(exchange.balanceOf(account, WETH9), int128(amount));
+        assertEq(spotEngine.getBalance(WETH9, account), int128(amount));
+        assertEq(spotEngine.getTotalBalance(WETH9), amount);
+        assertEq(ERC20Simple(WETH9).balanceOf(address(exchange)), amount);
     }
 
     function test_depositRaw_revertsIfZeroAmount() public {
@@ -2068,6 +2078,58 @@ contract ExchangeTest is Test {
         );
     }
 
+    function test_processBatch_withdraw_notUnderlyingToken() public {
+        ERC20Simple newToken = new ERC20Simple();
+
+        vm.prank(sequencer);
+        exchange.addSupportedToken(address(newToken));
+
+        newToken.mint(address(exchange), type(uint128).max);
+
+        uint128 amount = 5 * 1e18;
+        (address account, uint256 accountKey) = makeAddrAndKey("account");
+
+        {
+            vm.startPrank(address(exchange));
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] = ISpot.AccountDelta({token: address(newToken), account: account, amount: int128(amount)});
+            spotEngine.modifyAccount(deltas);
+            spotEngine.setTotalBalance(address(newToken), amount, true);
+            vm.stopPrank();
+        }
+
+        int256 accountBalanceStateBefore = spotEngine.getBalance(address(newToken), account);
+        uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(newToken));
+
+        uint256 exchangeBalanceBefore = newToken.balanceOf(address(exchange));
+        uint256 accountBalanceBefore = newToken.balanceOf(account);
+
+        uint64 nonce = 1;
+        bytes memory signature = _signTypedDataHash(
+            accountKey, keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(newToken), amount, nonce))
+        );
+        uint128 withdrawFee = 1 * 1e16;
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.Withdraw,
+            abi.encode(IExchange.Withdraw(account, address(newToken), amount, nonce, signature, withdrawFee))
+        );
+
+        uint256 balanceAfter = totalBalanceStateBefore - amount;
+        vm.expectEmit(address(exchange));
+        emit IExchange.WithdrawSucceeded(address(newToken), account, nonce, amount, balanceAfter, withdrawFee);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isWithdrawNonceUsed(account, nonce), true);
+        assertEq(spotEngine.getBalance(address(newToken), account), accountBalanceStateBefore - int128(amount));
+        assertEq(spotEngine.getTotalBalance(address(newToken)), balanceAfter);
+
+        uint8 tokenDecimals = newToken.decimals();
+        uint128 netAmount = amount - withdrawFee;
+        assertEq(newToken.balanceOf(account), accountBalanceBefore + netAmount.convertFrom18D(tokenDecimals));
+        assertEq(newToken.balanceOf(address(exchange)), exchangeBalanceBefore - netAmount.convertFrom18D(tokenDecimals));
+    }
+
     function test_processBatch_withdraw_revertsIfDisabledWithdraw() public {
         vm.startPrank(sequencer);
         exchange.setCanWithdraw(false);
@@ -2587,8 +2649,9 @@ contract ExchangeTest is Test {
         uint256 orderbookCollectedSequencerFees = 90 * 1e18;
         uint256 totalCollectedFees = exchangeCollectedSequencerFees + orderbookCollectedSequencerFees;
 
-        stdstore.target(address(exchange)).sig("getSequencerFees()").checked_write(exchangeCollectedSequencerFees);
-        assertEq(uint256(exchange.getSequencerFees()), exchangeCollectedSequencerFees);
+        stdstore.target(address(exchange)).sig("getSequencerFees(address)").with_key(address(collateralToken))
+            .checked_write(exchangeCollectedSequencerFees);
+        assertEq(uint256(exchange.getSequencerFees(address(collateralToken))), exchangeCollectedSequencerFees);
         stdstore.target(address(orderbook)).sig("getSequencerFees()").checked_write(orderbookCollectedSequencerFees);
         assertEq(uint256(orderbook.getSequencerFees()), orderbookCollectedSequencerFees);
         collateralToken.mint(address(exchange), uint128(totalCollectedFees).convertFrom18D(collateralToken.decimals()));
@@ -2596,12 +2659,69 @@ contract ExchangeTest is Test {
         uint256 balanceBefore = collateralToken.balanceOf(feeRecipient);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.ClaimSequencerFees(sequencer, totalCollectedFees);
+        emit IExchange.ClaimSequencerFees(sequencer, address(collateralToken), totalCollectedFees);
         exchange.claimSequencerFees();
 
         uint256 balanceAfter = collateralToken.balanceOf(feeRecipient);
         assertEq(balanceAfter, balanceBefore + uint128(totalCollectedFees).convertFrom18D(collateralToken.decimals()));
-        assertEq(exchange.getSequencerFees(), 0);
+        assertEq(exchange.getSequencerFees(address(collateralToken)), 0);
+        assertEq(orderbook.getSequencerFees(), 0);
+    }
+
+    function test_claimCollectedSequencerFees_multipleTokens() public {
+        ERC20Simple token1 = new ERC20Simple();
+        ERC20Simple token2 = new ERC20Simple();
+
+        uint256 token1CollectedFee = 70 * 1e18;
+        uint256 token2CollectedFee = 90 * 1e18;
+        uint256 orderbookCollectedSequencerFees = 20 * 1e18;
+
+        stdstore.target(address(exchange)).sig("getSequencerFees(address)").with_key(address(token1)).checked_write(
+            token1CollectedFee
+        );
+        stdstore.target(address(exchange)).sig("getSequencerFees(address)").with_key(address(token2)).checked_write(
+            token2CollectedFee
+        );
+
+        stdstore.target(address(orderbook)).sig("getSequencerFees()").checked_write(orderbookCollectedSequencerFees);
+
+        vm.startPrank(sequencer);
+
+        exchange.addSupportedToken(address(token1));
+        exchange.addSupportedToken(address(token2));
+
+        token1.mint(address(exchange), uint128(token1CollectedFee).convertFrom18D(token1.decimals()));
+        token2.mint(address(exchange), uint128(token2CollectedFee).convertFrom18D(token2.decimals()));
+        collateralToken.mint(
+            address(exchange), uint128(orderbookCollectedSequencerFees).convertFrom18D(collateralToken.decimals())
+        );
+
+        uint256 token1BalanceBefore = token1.balanceOf(feeRecipient);
+        uint256 token2BalanceBefore = token2.balanceOf(feeRecipient);
+        uint256 underlyingTokenBalanceBefore = collateralToken.balanceOf(feeRecipient);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.ClaimSequencerFees(sequencer, address(token1), token1CollectedFee);
+        emit IExchange.ClaimSequencerFees(sequencer, address(token2), token2CollectedFee);
+        emit IExchange.ClaimSequencerFees(sequencer, address(collateralToken), orderbookCollectedSequencerFees);
+        exchange.claimSequencerFees();
+
+        assertEq(
+            token1.balanceOf(feeRecipient),
+            token1BalanceBefore + uint128(token1CollectedFee).convertFrom18D(token1.decimals())
+        );
+        assertEq(
+            token2.balanceOf(feeRecipient),
+            token2BalanceBefore + uint128(token2CollectedFee).convertFrom18D(token2.decimals())
+        );
+        assertEq(
+            collateralToken.balanceOf(feeRecipient),
+            underlyingTokenBalanceBefore
+                + uint128(orderbookCollectedSequencerFees).convertFrom18D(collateralToken.decimals())
+        );
+        assertEq(exchange.getSequencerFees(address(token1)), 0);
+        assertEq(exchange.getSequencerFees(address(token2)), 0);
+        assertEq(exchange.getSequencerFees(address(collateralToken)), 0);
         assertEq(orderbook.getSequencerFees(), 0);
     }
 
