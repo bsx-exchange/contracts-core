@@ -97,6 +97,33 @@ library Errors {
     /// @notice Thrown when withdrawing with used nonce
     error Exchange_Withdraw_NonceUsed(address account, uint64 nonce);
 
+    /// @notice Thrown when caller is not this contract
+    error Exchange_Liquidation_InternalCall();
+
+    /// @notice Thrown when account balance in not positive
+    error Exchange_Liquidation_InvalidBalance(address account, address token, int256 balance);
+
+    /// @notice Thrown when exceeded balance to liquidate
+    error Exchange_Liquidation_ExceededBalance(address account, address token, int256 balance, uint256 amountIn);
+
+    /// @notice Thrown when asset is not whitelisted
+    error Exchange_Liquidation_InvalidAsset(address asset);
+
+    /// @notice Thrown when invalid command
+    /// Valid commands include V3_SWAP_EXACT_IN, V3_SWAP_EXACT_OUT, V2_SWAP_EXACT_IN, V2_SWAP_EXACT_OUT
+    error Exchange_Liquidation_InvalidCommand(uint256 command);
+
+    /// @notice Thrown when liquidating with used nonce
+    error Exchange_Liquidation_NonceUsed(address account, uint256 nonce);
+
+    /// @notice Thrown when empty executions submitted to Universal Router
+    error Exchange_Liquidation_EmptyExecution();
+
+    /// @notice Thrown when empty commands submitted to Universal Router
+    error Exchange_Liquidation_EmptyCommand();
+
+    error Exchange_Liquidation_ExceededMaxLiquidationFeePips(uint256 feePips);
+
     /*//////////////////////////////////////////////////////////////////////////
                                     CLEARING SERVICE
     //////////////////////////////////////////////////////////////////////////*/

@@ -26,7 +26,7 @@ contract MathHelperTest is Test {
     using MathHelper for uint128;
 
     MathHelperCall private mathHelperCall = new MathHelperCall();
-    ERC20Simple private token = new ERC20Simple();
+    ERC20Simple private token = new ERC20Simple(6);
 
     function test_mul18D() public pure {
         int128 x = 10 * 1e18;

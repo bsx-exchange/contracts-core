@@ -39,7 +39,7 @@ contract BSX1000xTest is Test {
 
         access.setExchange(address(new Exchange()));
 
-        collateralToken = new ERC20Simple();
+        collateralToken = new ERC20Simple(6);
 
         bsx1000x = new BSX1000x();
         bsx1000x.initialize("BSX1000x", "1", address(access), address(collateralToken));

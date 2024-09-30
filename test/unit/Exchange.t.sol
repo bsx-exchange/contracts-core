@@ -54,7 +54,7 @@ contract ExchangeTest is Test {
     address private takerSigner;
     uint256 private takerSignerKey;
 
-    ERC20Simple private collateralToken = new ERC20Simple();
+    ERC20Simple private collateralToken = new ERC20Simple(6);
 
     Access private access;
     Exchange private exchange;
@@ -126,40 +126,20 @@ contract ExchangeTest is Test {
         access.setOrderBook(address(orderbook));
         access.setSpotEngine(address(spotEngine));
 
-        exchange.initialize(
-            address(access),
-            address(clearingService),
-            address(spotEngine),
-            address(perpEngine),
-            address(orderbook),
-            feeRecipient
-        );
+        stdstore.target(address(exchange)).sig("access()").checked_write(address(access));
+        stdstore.target(address(exchange)).sig("book()").checked_write(address(orderbook));
+        stdstore.target(address(exchange)).sig("clearingService()").checked_write(address(clearingService));
+        stdstore.target(address(exchange)).sig("spotEngine()").checked_write(address(spotEngine));
+        stdstore.target(address(exchange)).sig("perpEngine()").checked_write(address(perpEngine));
+        exchange.updateFeeRecipientAddress(feeRecipient);
+        exchange.setCanDeposit(true);
+        exchange.setCanWithdraw(true);
+
         exchange.addSupportedToken(address(collateralToken));
 
         _accountSetup();
 
         vm.stopPrank();
-    }
-
-    function test_initialize() public view {
-        assertEq(address(exchange.access()), address(access));
-        assertEq(address(exchange.clearingService()), address(clearingService));
-        assertEq(address(exchange.spotEngine()), address(spotEngine));
-        assertEq(address(exchange.perpEngine()), address(perpEngine));
-        assertEq(address(exchange.book()), address(orderbook));
-        assertEq(exchange.feeRecipientAddress(), feeRecipient);
-    }
-
-    function test_initialize_revertsIfSetZeroAddr() public {
-        Exchange _exchange = new Exchange();
-        address mockAddr = makeAddr("mockAddr");
-        address[6] memory addresses = [mockAddr, mockAddr, mockAddr, mockAddr, mockAddr, mockAddr];
-        for (uint256 i = 0; i < 5; i++) {
-            addresses[i] = address(0);
-            vm.expectRevert(Errors.ZeroAddress.selector);
-            _exchange.initialize(addresses[0], addresses[1], addresses[2], addresses[3], addresses[4], addresses[5]);
-            addresses[i] = mockAddr;
-        }
     }
 
     function test_addSupportedToken() public {
@@ -2079,7 +2059,7 @@ contract ExchangeTest is Test {
     }
 
     function test_processBatch_withdraw_notUnderlyingToken() public {
-        ERC20Simple newToken = new ERC20Simple();
+        ERC20Simple newToken = new ERC20Simple(6);
 
         vm.prank(sequencer);
         exchange.addSupportedToken(address(newToken));
@@ -2669,8 +2649,8 @@ contract ExchangeTest is Test {
     }
 
     function test_claimCollectedSequencerFees_multipleTokens() public {
-        ERC20Simple token1 = new ERC20Simple();
-        ERC20Simple token2 = new ERC20Simple();
+        ERC20Simple token1 = new ERC20Simple(6);
+        ERC20Simple token2 = new ERC20Simple(6);
 
         uint256 token1CollectedFee = 70 * 1e18;
         uint256 token2CollectedFee = 90 * 1e18;

@@ -4,7 +4,11 @@ pragma solidity >=0.8.23;
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract ERC20Simple is ERC20 {
-    constructor() ERC20("ERC20Simple", "SIM") {}
+    uint8 private _decimals;
+
+    constructor(uint8 decimals_) ERC20("ERC20Simple", "SIM") {
+        _decimals = decimals_;
+    }
 
     /// @dev add this to exclude from the coverage report
     function test() public pure returns (bool) {
@@ -16,7 +20,7 @@ contract ERC20Simple is ERC20 {
         _mint(to, amount);
     }
 
-    function decimals() public pure override returns (uint8) {
-        return 6;
+    function decimals() public view override returns (uint8) {
+        return _decimals;
     }
 }

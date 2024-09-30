@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {ILiquidation} from "./ILiquidation.sol";
+
 /// @title Exchange
 /// @notice Entrypoint of the system
-interface IExchange {
+interface IExchange is ILiquidation {
     /// @notice Emitted when a token is added to the supported tokens list
     /// @param token Token address which is added
     event SupportedTokenAdded(address indexed token);
@@ -72,6 +74,7 @@ interface IExchange {
     /// @param insuranceFund Insurance fund after withdraw (in 18 decimals)
     event WithdrawInsuranceFund(uint256 withdrawAmount, uint256 insuranceFund);
 
+    /// @notice Emitted when trading fees are claimed
     event ClaimTradingFees(address indexed claimer, uint256 amount);
 
     /// @notice Emitted when sequencer fees are claimed

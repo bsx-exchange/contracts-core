@@ -15,7 +15,7 @@ gas_reports = [
   "SpotEngine",
 ]
 optimizer = true
-optimizer_runs = 1_000
+optimizer_runs = 800
 out = "out"
 script = "script"
 solc = "0.8.25"
