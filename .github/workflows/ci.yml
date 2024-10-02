@@ -108,7 +108,7 @@ jobs:
         run: "bun install"
 
       - name: "Forge coverage"
-        run: "forge coverage --report lcov"
+        run: "forge coverage --report lcov --ir-minimum"
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4.0.1
