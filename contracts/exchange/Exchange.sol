@@ -101,16 +101,6 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
         _;
     }
 
-    function migrate(address _universalRouter) external onlyRole(access.GENERAL_ROLE()) {
-        require(_sequencerFee != 0, "migrated sequencer fee");
-        _sequencerFee = 0;
-
-        require(_universalRouter != address(0) && universalRouter == address(0), "migrated universal router");
-        address underlyingAsset = book.getCollateralToken();
-        _collectedFee[underlyingAsset] = uint256(_sequencerFee);
-        universalRouter = _universalRouter;
-    }
-
     ///@inheritdoc IExchange
     function addSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
         bool success = supportedTokens.add(token);
