@@ -26,14 +26,7 @@ import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {
-    MAX_LIQUIDATION_FEE_RATE,
-    MAX_REBATE_RATE,
-    MAX_WITHDRAWAL_FEE,
-    MIN_WITHDRAW_AMOUNT,
-    NATIVE_ETH,
-    WETH9
-} from "./share/Constants.sol";
+import {MAX_LIQUIDATION_FEE_RATE, MAX_REBATE_RATE, NATIVE_ETH, WETH9} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
 
 /// @title Exchange contract
@@ -602,8 +595,10 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             if (!canWithdraw) {
                 revert Errors.Exchange_DisabledWithdraw();
             }
-            if (txs.withdrawalSequencerFee > MAX_WITHDRAWAL_FEE) {
-                revert Errors.Exchange_ExceededMaxWithdrawFee(txs.withdrawalSequencerFee, MAX_WITHDRAWAL_FEE);
+
+            uint128 maxWithdrawalFee = _getMaxWithdrawalFee(txs.token);
+            if (txs.withdrawalSequencerFee > maxWithdrawalFee) {
+                revert Errors.Exchange_ExceededMaxWithdrawFee(txs.withdrawalSequencerFee, maxWithdrawalFee);
             }
             if (isWithdrawNonceUsed[txs.sender][txs.nonce]) {
                 revert Errors.Exchange_Withdraw_NonceUsed(txs.sender, txs.nonce);
@@ -618,7 +613,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             }
 
             int256 currentBalance = balanceOf(txs.sender, txs.token);
-            if (txs.amount < MIN_WITHDRAW_AMOUNT || currentBalance < int256(int128(txs.amount))) {
+            if (currentBalance < int256(int128(txs.amount))) {
                 emit WithdrawFailed(txs.sender, txs.nonce, txs.amount, currentBalance);
                 return;
             } else {
@@ -685,6 +680,14 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
                 )
             )
         );
+    }
+
+    function _getMaxWithdrawalFee(address token) internal pure returns (uint128) {
+        if (token == WETH9) {
+            return 0.001 ether;
+        } else {
+            return 1e18;
+        }
     }
 
     /// @dev Validates and authorizes a signer to sign on behalf of a sender.

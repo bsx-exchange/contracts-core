@@ -24,13 +24,7 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
-import {
-    MAX_REBATE_RATE,
-    MAX_WITHDRAWAL_FEE,
-    MIN_WITHDRAW_AMOUNT,
-    NATIVE_ETH,
-    WETH9
-} from "contracts/exchange/share/Constants.sol";
+import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, NATIVE_ETH, WETH9} from "contracts/exchange/share/Constants.sol";
 import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
@@ -2181,14 +2175,22 @@ contract ExchangeTest is Test {
         vm.startPrank(sequencer);
 
         address account = makeAddr("account");
-        uint128 invalidFee = MAX_WITHDRAWAL_FEE + 1;
+
+        // fee on stable token
+        uint128 invalidFee = 1e18 + 1;
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
             abi.encode(IExchange.Withdraw(account, address(collateralToken), 100, 0, "", invalidFee))
         );
-        vm.expectRevert(
-            abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, MAX_WITHDRAWAL_FEE)
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 1e18));
+        exchange.processBatch(operation.toArray());
+
+        // fee on weth
+        invalidFee = 1e15 + 1;
+        operation = _encodeDataToOperation(
+            IExchange.OperationType.Withdraw, abi.encode(IExchange.Withdraw(account, WETH9, 100, 0, "", invalidFee))
         );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 1e15));
         exchange.processBatch(operation.toArray());
     }
 
@@ -2272,41 +2274,6 @@ contract ExchangeTest is Test {
 
         assertEq(collateralToken.balanceOf(account), accountBalanceBefore);
         assertEq(collateralToken.balanceOf(address(exchange)), exchangeBalanceBefore);
-    }
-
-    function test_processBatch_withdraw_revertsIfWithdrawAmountTooSmall() public {
-        collateralToken.mint(address(exchange), type(uint128).max);
-
-        (address account, uint256 accountKey) = makeAddrAndKey("account");
-        uint128 balance = 5 * 1e18;
-
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: int128(balance)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(collateralToken), balance, true);
-            vm.stopPrank();
-        }
-
-        vm.startPrank(sequencer);
-
-        uint64 nonce = 1;
-        uint128 withdrawAmount = MIN_WITHDRAW_AMOUNT - 1;
-        bytes memory signature = _signTypedDataHash(
-            accountKey,
-            keccak256(
-                abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(collateralToken), withdrawAmount, nonce)
-            )
-        );
-        bytes memory data =
-            abi.encode(IExchange.Withdraw(account, address(collateralToken), withdrawAmount, nonce, signature, 0));
-        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Withdraw, data);
-        vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawFailed(account, nonce, withdrawAmount, int128(balance));
-        exchange.processBatch(operation.toArray());
-
-        assertEq(exchange.isWithdrawNonceUsed(account, nonce), true);
     }
 
     function test_processBatch_coverLossWithInsuranceFund() public {
