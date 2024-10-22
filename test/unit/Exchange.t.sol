@@ -250,7 +250,7 @@ contract ExchangeTest is Test {
 
             totalAmount += amount;
             vm.expectEmit(address(exchange));
-            emit IExchange.Deposit(address(collateralToken), account, amount, totalAmount);
+            emit IExchange.Deposit(address(collateralToken), account, amount, 0);
             exchange.deposit(address(collateralToken), amount);
 
             assertEq(exchange.balanceOf(account, address(collateralToken)), int128(totalAmount));
@@ -275,7 +275,7 @@ contract ExchangeTest is Test {
         _prepareDeposit(account, address(erc20MissingReturn), amount);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.Deposit(address(erc20MissingReturn), account, amount, amount);
+        emit IExchange.Deposit(address(erc20MissingReturn), account, amount, 0);
         exchange.deposit(address(erc20MissingReturn), amount);
 
         assertEq(exchange.balanceOf(account, address(erc20MissingReturn)), int128(amount));
@@ -297,7 +297,7 @@ contract ExchangeTest is Test {
 
         vm.prank(account);
         vm.expectEmit(address(exchange));
-        emit IExchange.Deposit(WETH9, account, amount, amount);
+        emit IExchange.Deposit(WETH9, account, amount, 0);
         exchange.deposit{value: amount}(NATIVE_ETH, amount);
 
         assertEq(exchange.balanceOf(account, WETH9), int128(amount));
@@ -343,7 +343,7 @@ contract ExchangeTest is Test {
 
             totalAmount += amount;
             vm.expectEmit(address(exchange));
-            emit IExchange.Deposit(address(collateralToken), recipient, amount, totalAmount);
+            emit IExchange.Deposit(address(collateralToken), recipient, amount, 0);
             exchange.deposit(recipient, address(collateralToken), amount);
 
             assertEq(exchange.balanceOf(payer, address(collateralToken)), 0);
@@ -370,7 +370,7 @@ contract ExchangeTest is Test {
         _prepareDeposit(payer, address(erc20MissingReturn), amount);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.Deposit(address(erc20MissingReturn), recipient, amount, amount);
+        emit IExchange.Deposit(address(erc20MissingReturn), recipient, amount, 0);
         exchange.deposit(recipient, address(erc20MissingReturn), amount);
 
         assertEq(spotEngine.getBalance(address(erc20MissingReturn), recipient), int128(amount));
@@ -420,7 +420,7 @@ contract ExchangeTest is Test {
             uint128 amount = uint128(rawAmount.convertTo18D(tokenDecimals));
             totalAmount += amount;
             vm.expectEmit(address(exchange));
-            emit IExchange.Deposit(address(collateralToken), account, amount, totalAmount);
+            emit IExchange.Deposit(address(collateralToken), account, amount, 0);
             exchange.depositRaw(account, address(collateralToken), rawAmount);
 
             assertEq(exchange.balanceOf(account, address(collateralToken)), int128(totalAmount));
@@ -447,7 +447,7 @@ contract ExchangeTest is Test {
 
         uint128 amount = uint128(rawAmount.convertTo18D(tokenDecimals));
         vm.expectEmit(address(exchange));
-        emit IExchange.Deposit(address(erc20MissingReturn), account, amount, amount);
+        emit IExchange.Deposit(address(erc20MissingReturn), account, amount, 0);
         exchange.depositRaw(account, address(erc20MissingReturn), rawAmount);
 
         assertEq(exchange.balanceOf(account, address(erc20MissingReturn)), int128(amount));
@@ -471,7 +471,7 @@ contract ExchangeTest is Test {
 
         vm.prank(account);
         vm.expectEmit(address(exchange));
-        emit IExchange.Deposit(WETH9, account, amount, amount);
+        emit IExchange.Deposit(WETH9, account, amount, 0);
         exchange.depositRaw{value: amount}(account, NATIVE_ETH, amount);
 
         assertEq(exchange.balanceOf(account, WETH9), int128(amount));
@@ -533,7 +533,7 @@ contract ExchangeTest is Test {
             );
 
             vm.expectEmit(address(exchange));
-            emit IExchange.Deposit(address(collateralToken), account, amount, totalAmount);
+            emit IExchange.Deposit(address(collateralToken), account, amount, 0);
             vm.prank(sequencer);
             exchange.depositWithAuthorization(
                 address(collateralToken), account, amount, mockValidTime, mockValidTime, mockNonce, mockSignature
@@ -1972,7 +1972,7 @@ contract ExchangeTest is Test {
 
         uint256 balanceAfter = totalBalanceStateBefore - amount;
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawSucceeded(address(collateralToken), account, nonce, amount, balanceAfter, withdrawFee);
+        emit IExchange.WithdrawSucceeded(address(collateralToken), account, nonce, amount, 0, withdrawFee);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -2029,9 +2029,7 @@ contract ExchangeTest is Test {
 
         uint256 balanceAfter = totalBalanceStateBefore - amount;
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawSucceeded(
-            address(collateralToken), contractAccount, nonce, amount, balanceAfter, withdrawFee
-        );
+        emit IExchange.WithdrawSucceeded(address(collateralToken), contractAccount, nonce, amount, 0, withdrawFee);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -2090,7 +2088,7 @@ contract ExchangeTest is Test {
 
         uint256 balanceAfter = totalBalanceStateBefore - amount;
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawSucceeded(address(newToken), account, nonce, amount, balanceAfter, withdrawFee);
+        emit IExchange.WithdrawSucceeded(address(newToken), account, nonce, amount, 0, withdrawFee);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -2176,21 +2174,23 @@ contract ExchangeTest is Test {
 
         address account = makeAddr("account");
 
-        // fee on stable token
-        uint128 invalidFee = 1e18 + 1;
+        // fee on stable tokens
+        uint128 invalidFee = 1 ether + 1;
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
             abi.encode(IExchange.Withdraw(account, address(collateralToken), 100, 0, "", invalidFee))
         );
-        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 1e18));
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 1 ether));
         exchange.processBatch(operation.toArray());
 
         // fee on weth
-        invalidFee = 1e15 + 1;
+        invalidFee = 0.001 ether + 1;
         operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw, abi.encode(IExchange.Withdraw(account, WETH9, 100, 0, "", invalidFee))
         );
-        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 1e15));
+        vm.expectRevert(
+            abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 0.001 ether)
+        );
         exchange.processBatch(operation.toArray());
     }
 

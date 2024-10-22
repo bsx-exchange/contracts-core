@@ -21,7 +21,7 @@ interface IExchange is ILiquidation {
     /// @param token Token address
     /// @param user  User address
     /// @param amount Deposit amount (in 18 decimals)
-    /// @param balance Balance of user after deposit
+    /// @param balance Deprecated, always 0
     event Deposit(address indexed token, address indexed user, uint256 amount, uint256 balance);
 
     /// @dev Emitted when a user withdraws tokens from the exchange successfully.
@@ -29,7 +29,7 @@ interface IExchange is ILiquidation {
     /// @param user Account address
     /// @param nonce Nonce of the withdrawal
     /// @param amount Withdraw amount (in 18 decimals)
-    /// @param balance Balance of account after withdraw (in 18 decimals)
+    /// @param balance Deprecated, always 0
     /// @param withdrawalSequencerFee Sequencer fee of the withdrawal (in 18 decimals)
     event WithdrawSucceeded(
         address indexed token,

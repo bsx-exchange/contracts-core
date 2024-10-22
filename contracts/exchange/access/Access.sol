@@ -127,11 +127,10 @@ contract Access is Initializable, AccessControlUpgradeable {
         return bsx1000;
     }
 
-    function getAccountsForRole(bytes32 role) external view returns (address[] memory) {
-        address[] memory accounts = new address[](roles[role].length());
+    function getAccountsForRole(bytes32 role) external view returns (address[] memory accounts) {
+        accounts = new address[](roles[role].length());
         for (uint256 i = 0; i < roles[role].length(); i++) {
             accounts[i] = roles[role].at(i);
         }
-        return accounts;
     }
 }

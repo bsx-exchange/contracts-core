@@ -420,7 +420,7 @@ contract OrderbookTest is Test {
             maker: 2e14,
             taker: 4e14,
             referralRebate: 5e12,
-            liquidationPenalty: uint128(int128(size).mul18D(int128(price))) * MAX_LIQUIDATION_FEE_RATE + 1
+            liquidationPenalty: size.mul18D(price).calculatePercentage(MAX_LIQUIDATION_FEE_RATE) + 1
         });
         uint128 takerSequencerFee = 1e14;
 
@@ -555,15 +555,17 @@ contract OrderbookTest is Test {
         (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
         (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
 
-        int128 matchedQuoteAmount = int128(size).mul18D(int128(price));
+        uint128 matchedQuoteAmount = size.mul18D(price);
         IOrderBook.Fee memory fee;
 
-        fee.maker = matchedQuoteAmount.mul18D(MAX_MATCH_FEE_RATE) + 1;
+        assertEq(MAX_MATCH_FEE_RATE, (2 * uint256(Percentage.ONE_HUNDRED_PERCENT)) / 100);
+
+        fee.maker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE) + 1);
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
         orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
 
         fee.maker = 0;
-        fee.taker = matchedQuoteAmount.mul18D(MAX_MATCH_FEE_RATE) + 1;
+        fee.taker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE)) + 1;
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
         orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
     }

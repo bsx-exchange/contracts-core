@@ -38,7 +38,9 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     using LibOrder for LibOrder.Order;
     using SafeERC20 for IERC20Extend;
     using Percentage for uint128;
+    using MathHelper for uint128;
     using MathHelper for uint256;
+    using MathHelper for int128;
     using MathHelper for int256;
 
     IClearingService public clearingService;
@@ -126,20 +128,19 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             token = WETH9;
             IWETH9(token).deposit{value: amount}();
         } else {
-            (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(token);
+            (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
             if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
-            amount = uint128(roundDownAmount);
+            amount = roundDownAmount.safeUInt128();
             IERC20Extend(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
         }
 
         clearingService.deposit(recipient, amount, token, spotEngine);
-        int256 currentBalance = balanceOf(recipient, token);
-        emit Deposit(token, recipient, amount, uint256(currentBalance));
+        emit Deposit(token, recipient, amount, 0);
     }
 
     ///@inheritdoc IExchange
     function depositRaw(address recipient, address token, uint128 rawAmount) external payable supportedToken(token) {
-        uint256 amount = token == NATIVE_ETH ? rawAmount : uint256(rawAmount).convertToScale(token);
+        uint256 amount = token == NATIVE_ETH ? rawAmount : rawAmount.convertToScale(token);
         deposit(recipient, token, amount.safeUInt128());
     }
 
@@ -157,21 +158,20 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             revert Errors.Exchange_DisabledDeposit();
         }
 
-        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(token);
+        (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
         IERC3009Minimal(token).receiveWithAuthorization(
             depositor, address(this), amountToTransfer, validAfter, validBefore, nonce, signature
         );
         clearingService.deposit(depositor, roundDownAmount, token, spotEngine);
-        int256 currentBalance = spotEngine.getBalance(token, depositor);
-        emit Deposit(token, depositor, roundDownAmount, uint256(currentBalance));
+        emit Deposit(token, depositor, roundDownAmount, 0);
     }
 
     /// @inheritdoc IExchange
     function depositInsuranceFund(uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
         address token = book.getCollateralToken();
-        (uint256 roundDownAmount, uint256 amountToTransfer) = uint256(amount).roundDownAndConvertFromScale(token);
+        (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
         IERC20Extend(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
@@ -197,7 +197,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     /// @inheritdoc IExchange
     function claimTradingFees() external onlyRole(access.GENERAL_ROLE()) {
         address token = book.getCollateralToken();
-        uint256 totalFee = uint256(book.claimTradingFees());
+        uint256 totalFee = book.claimTradingFees().safeUInt256();
         uint256 amountToTransfer = totalFee.convertFromScale(token);
         IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
         emit ClaimTradingFees(msg.sender, totalFee);
@@ -342,12 +342,12 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             IERC20Extend(liquidationAsset).forceApprove(universalRouter, 0);
         }
 
-        if (countFailure == execLen) {
-            status = AccountLiquidationStatus.Failure;
-        } else if (countFailure > 0) {
-            status = AccountLiquidationStatus.Partial;
-        } else {
+        if (countFailure == 0) {
             status = AccountLiquidationStatus.Success;
+        } else if (countFailure == execLen) {
+            status = AccountLiquidationStatus.Failure;
+        } else {
+            status = AccountLiquidationStatus.Partial;
         }
     }
 
@@ -439,13 +439,12 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
     }
 
     /// @inheritdoc IExchange
-    function getSupportedTokenList() public view returns (address[] memory) {
+    function getSupportedTokenList() public view returns (address[] memory tokenList) {
         uint8 length = uint8(supportedTokens.length());
-        address[] memory tokenList = new address[](length);
+        tokenList = new address[](length);
         for (uint256 index = 0; index < length; index++) {
             tokenList[index] = supportedTokens.at(index);
         }
-        return tokenList;
     }
 
     /// @inheritdoc IExchange
@@ -613,7 +612,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             }
 
             int256 currentBalance = balanceOf(txs.sender, txs.token);
-            if (currentBalance < int256(int128(txs.amount))) {
+            if (currentBalance.safeInt128() < txs.amount.safeInt128()) {
                 emit WithdrawFailed(txs.sender, txs.nonce, txs.amount, currentBalance);
                 return;
             } else {
@@ -623,10 +622,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
                 uint256 amountToTransfer = netAmount.convertFromScale(txs.token);
                 _collectedFee[txs.token] += txs.withdrawalSequencerFee;
                 product.safeTransfer(txs.sender, amountToTransfer);
-                int256 afterBalance = balanceOf(txs.sender, txs.token);
-                emit WithdrawSucceeded(
-                    txs.token, txs.sender, txs.nonce, txs.amount, uint256(afterBalance), txs.withdrawalSequencerFee
-                );
+                emit WithdrawSucceeded(txs.token, txs.sender, txs.nonce, txs.amount, 0, txs.withdrawalSequencerFee);
             }
         } else {
             revert Errors.Exchange_InvalidOperationType();
@@ -765,27 +761,28 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgrade
             revert Errors.Exchange_ExceededMaxRebateRate(rebateRate, MAX_REBATE_RATE);
         }
 
-        rebate = uint128(fee).calculatePercentage(rebateRate);
+        rebate = fee.safeUInt128().calculatePercentage(rebateRate);
 
         ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
-        productDeltas[0] = ISpot.AccountDelta(book.getCollateralToken(), referrer, int128(rebate));
+        productDeltas[0] = ISpot.AccountDelta(book.getCollateralToken(), referrer, rebate.safeInt128());
         spotEngine.modifyAccount(productDeltas);
 
         emit RebateReferrer(referrer, rebate);
     }
 
     /// @dev Rebate maker if the fee is defined as negative
+    /// @return Maker fee after rebate
     function _rebateMaker(address maker, int128 fee) internal returns (int128) {
         if (fee >= 0) {
             return fee;
         }
 
-        int128 rebate = -fee;
+        uint128 rebate = fee.abs();
         ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
-        productDeltas[0] = ISpot.AccountDelta(book.getCollateralToken(), maker, rebate);
+        productDeltas[0] = ISpot.AccountDelta(book.getCollateralToken(), maker, rebate.safeInt128());
         spotEngine.modifyAccount(productDeltas);
 
-        emit RebateMaker(maker, uint128(rebate));
+        emit RebateMaker(maker, rebate);
 
         return 0;
     }

@@ -107,7 +107,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
         collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
 
-        uint256 amount = uint256(rawAmount).convertToScale(token);
+        uint256 amount = rawAmount.convertToScale(token);
         uint256 newBalance = _balance[account].available + amount;
         _balance[account].available = newBalance;
 
@@ -139,7 +139,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     /// @inheritdoc IBSX1000x
     function withdraw(address account, uint256 amount, uint256 fee, uint256 nonce, bytes memory signature)
         public
-        onlyRole(access.GENERAL_ROLE())
+        onlyRole(access.BSX1000_OPERATOR_ROLE())
     {
         uint256 netAmount = amount - fee;
         uint256 amountToTransfer = netAmount.convertFromScale(address(collateralToken));
@@ -200,7 +200,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         if (order.leverage > MAX_LEVERAGE) {
             revert ExceededMaxLeverage();
         }
-        if (order.price.mul18D(uint128(order.size.abs())) > order.leverage.mul18D(order.margin) + uint128(MARGIN_ERR)) {
+        if (order.price.mul18D(order.size.abs()) > order.leverage.mul18D(order.margin) + MARGIN_ERR.safeUInt128()) {
             revert ExceededNotionalAmount();
         }
         int128 targetProfit = order.size.mul18D(order.takeProfitPrice.safeInt128() - order.price.safeInt128());

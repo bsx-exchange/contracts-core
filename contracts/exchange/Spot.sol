@@ -23,17 +23,13 @@ contract Spot is ISpot, Initializable, OwnableUpgradeable {
         access = Access(_access);
     }
 
-    function _onlySequencer() internal view {
+    modifier onlySequencer() {
         if (
             msg.sender != access.getExchange() && msg.sender != access.getClearingService()
                 && msg.sender != access.getOrderBook()
         ) {
             revert Errors.Unauthorized();
         }
-    }
-
-    modifier onlySequencer() {
-        _onlySequencer();
         _;
     }
 

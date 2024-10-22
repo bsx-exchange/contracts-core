@@ -36,39 +36,44 @@ library MathHelper {
         return safeUInt128(result);
     }
 
-    function abs(int128 a) internal pure returns (int128) {
-        return a < 0 ? -a : a;
+    function abs(int128 n) internal pure returns (uint128) {
+        unchecked {
+            // must be unchecked in order to support `n = type(int128).min`
+            return uint128(n >= 0 ? n : -n);
+        }
     }
 
-    function convertFromScale(uint256 scaledAmount, address token) internal view returns (uint256) {
+    function convertFromScale(uint256 scaledAmount, address token) internal view returns (uint256 originalAmount) {
         IERC20Extend product = IERC20Extend(token);
         uint8 decimals = product.decimals();
-        uint256 originalAmount = _convertFromScale(scaledAmount, decimals);
-        return originalAmount;
+        originalAmount = _convertFromScale(scaledAmount, decimals);
     }
 
     function roundDownAndConvertFromScale(uint256 scaledAmount, address token)
         internal
         view
-        returns (uint256, uint256)
+        returns (uint256 roundDown, uint256 originalAmount)
     {
         IERC20Extend product = IERC20Extend(token);
         uint8 decimals = product.decimals();
-        uint256 originalAmount = _convertFromScale(scaledAmount, decimals);
-        uint256 roundDown = _convertToScale(originalAmount, decimals);
-        return (roundDown, originalAmount);
+        originalAmount = _convertFromScale(scaledAmount, decimals);
+        roundDown = _convertToScale(originalAmount, decimals);
     }
 
-    function convertToScale(uint256 rawAmount, address token) internal view returns (uint256) {
+    function convertToScale(uint256 rawAmount, address token) internal view returns (uint256 scaledAmount) {
         IERC20Extend product = IERC20Extend(token);
         uint8 decimals = product.decimals();
-        uint256 scaledAmount = _convertToScale(rawAmount, decimals);
-        return uint128(scaledAmount);
+        scaledAmount = _convertToScale(rawAmount, decimals);
     }
 
     function safeUInt256(int256 n) internal pure returns (uint256) {
         if (n < 0) revert InvalidUInt256();
         return uint256(n);
+    }
+
+    function safeUInt128(int128 n) internal pure returns (uint128) {
+        if (n < 0) revert InvalidUInt128();
+        return uint128(n);
     }
 
     function safeUInt128(uint256 n) internal pure returns (uint128) {

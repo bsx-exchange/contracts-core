@@ -21,6 +21,7 @@ import {OrderSide} from "./share/Enums.sol";
 /// @dev This contract is upgradeable
 contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
     using MathHelper for int128;
+    using MathHelper for uint128;
     using Percentage for uint128;
 
     IClearingService public clearingService;
@@ -57,14 +58,10 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
         collateralToken = _collateralToken;
     }
 
-    function _onlySequencer() internal view {
+    modifier onlySequencer() {
         if (msg.sender != access.getExchange()) {
             revert Errors.Unauthorized();
         }
-    }
-
-    modifier onlySequencer() {
-        _onlySequencer();
         _;
     }
 
@@ -99,33 +96,32 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
         Delta memory takerDelta;
         Delta memory makerDelta;
         if (taker.order.orderSide == OrderSide.SELL) {
-            takerDelta.productAmount = -int128(fillAmount);
-            makerDelta.productAmount = int128(fillAmount);
-            takerDelta.quoteAmount = int128(price).mul18D(int128(fillAmount));
+            takerDelta.productAmount = -fillAmount.safeInt128();
+            makerDelta.productAmount = fillAmount.safeInt128();
+            takerDelta.quoteAmount = price.mul18D(fillAmount).safeInt128();
             makerDelta.quoteAmount = -takerDelta.quoteAmount;
         } else {
-            takerDelta.productAmount = int128(fillAmount);
-            makerDelta.productAmount = -int128(fillAmount);
-            makerDelta.quoteAmount = int128(price).mul18D(int128(fillAmount));
+            takerDelta.productAmount = fillAmount.safeInt128();
+            makerDelta.productAmount = -fillAmount.safeInt128();
+            makerDelta.quoteAmount = price.mul18D(fillAmount).safeInt128();
             takerDelta.quoteAmount = -makerDelta.quoteAmount;
         }
         if (
-            matchFee.maker > MathHelper.abs(makerDelta.quoteAmount.mul18D(MAX_MATCH_FEE_RATE))
-                || matchFee.taker > MathHelper.abs(takerDelta.quoteAmount.mul18D(MAX_MATCH_FEE_RATE))
+            matchFee.maker > makerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
+                || matchFee.taker > takerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
         ) {
             revert Errors.Orderbook_ExceededMaxTradingFee();
         }
 
         if (taker.isLiquidation) {
             uint128 liquidationFee = matchFee.liquidationPenalty;
-            uint128 maxLiquidationFee =
-                uint128(MathHelper.abs(takerDelta.quoteAmount)).calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
+            uint128 maxLiquidationFee = takerDelta.quoteAmount.abs().calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
 
             if (liquidationFee > maxLiquidationFee) {
                 revert Errors.Orderbook_ExceededMaxLiquidationFee();
             }
 
-            takerDelta.quoteAmount -= int128(liquidationFee);
+            takerDelta.quoteAmount -= liquidationFee.safeInt128();
             clearingService.collectLiquidationFee(taker.order.sender, taker.order.nonce, liquidationFee);
         }
 
@@ -135,8 +131,8 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
 
         //sequencer fee application
         if (filled[digest.taker] == 0) {
-            totalSequencerFee += int128(takerSequencerFee);
-            takerDelta.quoteAmount -= int128(takerSequencerFee);
+            totalSequencerFee += takerSequencerFee.safeInt128();
+            takerDelta.quoteAmount -= takerSequencerFee.safeInt128();
         }
 
         filled[digest.maker] += fillAmount;
@@ -180,17 +176,15 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
     }
 
     /// @inheritdoc IOrderBook
-    function claimTradingFees() external onlySequencer returns (int256) {
-        int256 totalFees = feeCollection.perpFeeCollection;
+    function claimTradingFees() external onlySequencer returns (int256 totalFees) {
+        totalFees = feeCollection.perpFeeCollection;
         feeCollection.perpFeeCollection = 0;
-        return totalFees;
     }
 
     /// @inheritdoc IOrderBook
-    function claimSequencerFees() external onlySequencer returns (int256) {
-        int256 totalFees = totalSequencerFee;
+    function claimSequencerFees() external onlySequencer returns (int256 totalFees) {
+        totalFees = totalSequencerFee;
         totalSequencerFee = 0;
-        return totalFees;
     }
 
     /// @inheritdoc IOrderBook
@@ -222,7 +216,7 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
     }
 
     function _updateFeeCollection(Fee calldata fee) internal {
-        feeCollection.perpFeeCollection += fee.maker + fee.taker - int128(fee.referralRebate);
+        feeCollection.perpFeeCollection += fee.maker + fee.taker - fee.referralRebate.safeInt128();
     }
 
     function _settleBalance(uint8 _productIndex, address _account, int128 _matchSize, int128 _quote, uint128 _price)
@@ -239,7 +233,7 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
         int128 newSize = balance.size + _matchSize;
         int128 amountToSettle;
         if (balance.size.mul18D(newSize) < 0) {
-            amountToSettle = newQuote + newSize.mul18D(int128(_price));
+            amountToSettle = newQuote + newSize.mul18D(_price.safeInt128());
         } else if (newSize == 0) {
             amountToSettle = newQuote;
         }

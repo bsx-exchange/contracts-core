@@ -24,17 +24,13 @@ contract Perp is IPerp, Initializable, OwnableUpgradeable {
         access = Access(_access);
     }
 
-    function _onlySequencer() internal view {
+    modifier onlySequencer() {
         if (
             msg.sender != access.getExchange() && msg.sender != access.getClearingService()
                 && msg.sender != access.getOrderBook()
         ) {
             revert Errors.Unauthorized();
         }
-    }
-
-    modifier onlySequencer() {
-        _onlySequencer();
         _;
     }
 
@@ -64,9 +60,8 @@ contract Perp is IPerp, Initializable, OwnableUpgradeable {
     }
 
     /// @inheritdoc IPerp
-    function getOpenPosition(address account, uint8 productIndex) public view returns (Balance memory) {
-        Balance memory _balance = balance[account][productIndex];
-        return _balance;
+    function getOpenPosition(address account, uint8 productIndex) public view returns (Balance memory position) {
+        position = balance[account][productIndex];
     }
 
     /// @inheritdoc IPerp

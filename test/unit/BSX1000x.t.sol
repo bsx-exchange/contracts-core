@@ -277,7 +277,7 @@ contract BSX1000xTest is Test {
         bytes memory signature = abi.encodePacked("signature");
 
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = access.BSX1000_OPERATOR_ROLE();
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)

@@ -9,11 +9,14 @@ import {IClearingService} from "./interfaces/IClearingService.sol";
 import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
+import {MathHelper} from "./lib/MathHelper.sol";
 
 /// @title Clearinghouse contract
 /// @notice Manage insurance fund and spot balance
 /// @dev This contract is upgradeable
 contract ClearingService is IClearingService, Initializable, OwnableUpgradeable {
+    using MathHelper for uint256;
+
     Access public access;
     uint256 private insuranceFundBalance;
 
@@ -24,21 +27,17 @@ contract ClearingService is IClearingService, Initializable, OwnableUpgradeable 
         access = Access(_access);
     }
 
-    function _onlySequencer() internal view {
+    modifier onlySequencer() {
         if (msg.sender != access.getExchange() && msg.sender != access.getOrderBook()) {
             revert Errors.Unauthorized();
         }
-    }
-
-    modifier onlySequencer() {
-        _onlySequencer();
         _;
     }
 
     /// @inheritdoc IClearingService
     function deposit(address account, uint256 amount, address token, ISpot spotEngine) external onlySequencer {
         ISpot.AccountDelta[] memory productDelta = new ISpot.AccountDelta[](1);
-        productDelta[0] = ISpot.AccountDelta(token, account, int256(amount));
+        productDelta[0] = ISpot.AccountDelta(token, account, amount.safeInt256());
         spotEngine.modifyAccount(productDelta);
         spotEngine.setTotalBalance(token, amount, true);
     }
@@ -46,7 +45,7 @@ contract ClearingService is IClearingService, Initializable, OwnableUpgradeable 
     /// @inheritdoc IClearingService
     function withdraw(address account, uint256 amount, address token, ISpot spotEngine) external onlySequencer {
         ISpot.AccountDelta[] memory productDelta = new ISpot.AccountDelta[](1);
-        productDelta[0] = ISpot.AccountDelta(token, account, -int256(amount));
+        productDelta[0] = ISpot.AccountDelta(token, account, -amount.safeInt256());
         spotEngine.modifyAccount(productDelta);
         spotEngine.setTotalBalance(token, amount, false);
     }
@@ -93,7 +92,7 @@ contract ClearingService is IClearingService, Initializable, OwnableUpgradeable 
         insuranceFundBalance -= amount;
 
         ISpot.AccountDelta[] memory productDelta = new ISpot.AccountDelta[](1);
-        productDelta[0] = ISpot.AccountDelta(collateralToken, account, int256(amount));
+        productDelta[0] = ISpot.AccountDelta(collateralToken, account, amount.safeInt256());
         spotEngine.modifyAccount(productDelta);
     }
 
