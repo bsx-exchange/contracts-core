@@ -57,6 +57,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
     mapping(address account => mapping(uint256 nonce => uint256)) private _credit;
 
+    uint256 public lockedFund;
+
     function _checkRole(bytes32 role, address account) internal view {
         if (!access.hasRole(role, account)) {
             revert IAccessControl.AccessControlUnauthorizedAccount(account, role);
@@ -225,7 +227,13 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         }
         accountBalance.available = newBalance.safeUInt256();
 
-        fundBalance = (fundBalance.safeInt256() + order.fee).safeUInt256();
+        int256 maxProfit = order.margin.safeInt256() * MAX_PROFIT_FACTOR;
+        int256 availableFund = fundBalance.safeInt256() + order.fee - maxProfit;
+        if (availableFund < 0) {
+            revert InsufficientFundBalance();
+        }
+        fundBalance = availableFund.safeUInt256();
+        lockedFund += maxProfit.safeUInt256();
 
         // update position
         position.status = PositionStatus.Open;
@@ -283,6 +291,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
         // update balance
         _unlockMargin(account, nonce, position.margin);
+        _unlockFund(position.margin * MAX_PROFIT_FACTOR.safeUInt256());
         _updateBalanceAfterClosingPosition(account, pnl, fee);
 
         emit ClosePosition(productId, account, nonce, pnl, fee, ClosePositionReason.Normal);
@@ -327,6 +336,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
         // update balance
         _unlockMargin(account, nonce, position.margin);
+        _unlockFund(position.margin * MAX_PROFIT_FACTOR.safeUInt256());
         _updateBalanceAfterClosingPosition(account, pnl, fee);
 
         emit ClosePosition(productId, account, nonce, pnl, fee, reason);
@@ -409,6 +419,11 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
             revert InsufficientFundBalance();
         }
         fundBalance = newFundBalance.safeUInt256();
+    }
+
+    function _unlockFund(uint256 amount) internal {
+        lockedFund -= amount;
+        fundBalance += amount;
     }
 
     function _validateAuthorization(address account, bytes32 digest, bytes memory signature) internal view {

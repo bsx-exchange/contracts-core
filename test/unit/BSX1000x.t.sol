@@ -496,6 +496,7 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
 
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
@@ -504,13 +505,16 @@ contract BSX1000xTest is Test {
 
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee));
+        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee) - lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore + lockedFund);
         assertEq(accountBalanceAfter.available, accountBalance - uint256(order.fee) - order.margin);
         assertEq(accountBalanceAfter.locked, order.margin);
         assertEq(
-            fundBalanceBefore + accountBalance,
-            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked
+            fundBalanceBefore + accountBalance + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked + lockedFundAfter
         );
 
         // check position state
@@ -548,6 +552,7 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
 
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
@@ -556,13 +561,16 @@ contract BSX1000xTest is Test {
 
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee));
+        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee) - lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore + lockedFund);
         assertEq(accountBalanceAfter.available, accountBalance - uint256(order.fee) - order.margin);
         assertEq(accountBalanceAfter.locked, order.margin);
         assertEq(
-            fundBalanceBefore + accountBalance,
-            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked
+            fundBalanceBefore + accountBalance + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked + lockedFundAfter
         );
 
         // check position state
@@ -769,6 +777,38 @@ contract BSX1000xTest is Test {
         bsx1000x.openPosition(order, signature);
     }
 
+    function test_openPosition_revertsIfInsufficientFund() public {
+        (address account, uint256 accountKey) = makeAddrAndKey("account");
+        (, uint256 signerKey) = makeAddrAndKey("signer");
+        _authorizeSigner(accountKey, signerKey);
+
+        uint256 accountBalance = 100 * 1e18;
+        _deposit(account, accountBalance);
+
+        BSX1000x.Order memory order;
+        order.productId = 1;
+        order.account = account;
+        order.nonce = 5;
+        order.margin = 1 * 1e18;
+        order.leverage = 1000 * 1e18;
+        order.size = -1 * 1e18;
+        order.price = 1000 * 1e18;
+        order.takeProfitPrice = 999 * 1e18;
+        order.liquidationPrice = 1001 * 1e18;
+
+        // fund can not cover fee
+        order.fee = -1e16;
+        bytes memory signature = _signOpenOrder(signerKey, order);
+        vm.expectRevert(IBSX1000x.InsufficientFundBalance.selector);
+        bsx1000x.openPosition(order, signature);
+
+        // fund can not cover max profit
+        order.fee = 1e16;
+        signature = _signOpenOrder(signerKey, order);
+        vm.expectRevert(IBSX1000x.InsufficientFundBalance.selector);
+        bsx1000x.openPosition(order, signature);
+    }
+
     function test_openPosition_revertsIfInsufficientBalance() public {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         (, uint256 signerKey) = makeAddrAndKey("signer");
@@ -824,6 +864,7 @@ contract BSX1000xTest is Test {
         uint256 credit = 4 * 1e18;
 
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
@@ -832,13 +873,16 @@ contract BSX1000xTest is Test {
 
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee) - credit);
+        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee) - credit - lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore + lockedFund);
         assertEq(accountBalanceAfter.available, accountBalance - uint256(order.fee) - (order.margin - credit));
         assertEq(accountBalanceAfter.locked, order.margin - credit);
         assertEq(
-            fundBalanceBefore + accountBalance,
-            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked + credit
+            fundBalanceBefore + accountBalance + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked + credit + lockedFundAfter
         );
 
         // check position state
@@ -877,6 +921,7 @@ contract BSX1000xTest is Test {
         uint256 credit = 5 * 1e18;
 
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
@@ -885,13 +930,16 @@ contract BSX1000xTest is Test {
 
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee) - credit);
+        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(order.fee) - credit - lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore + lockedFund);
         assertEq(accountBalanceAfter.available, accountBalance - uint256(order.fee) - (order.margin - credit));
         assertEq(accountBalanceAfter.locked, order.margin - credit);
         assertEq(
-            fundBalanceBefore + accountBalance,
-            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked + credit
+            fundBalanceBefore + accountBalance + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + accountBalanceAfter.locked + credit + lockedFundAfter
         );
 
         // check position state
@@ -968,6 +1016,7 @@ contract BSX1000xTest is Test {
         bytes memory closeSignature = _signCloseOrder(signerKey, order);
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
 
         vm.expectEmit();
@@ -981,16 +1030,19 @@ contract BSX1000xTest is Test {
         BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1039,6 +1091,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1051,16 +1104,19 @@ contract BSX1000xTest is Test {
         BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1112,6 +1168,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1124,16 +1181,19 @@ contract BSX1000xTest is Test {
         BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + credit,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + credit + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1399,6 +1459,7 @@ contract BSX1000xTest is Test {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         (, uint256 signerKey) = makeAddrAndKey("signer");
         _authorizeSigner(accountKey, signerKey);
+        _depositFund();
 
         uint256 accountBalance = 100 * 1e18;
         _deposit(account, accountBalance);
@@ -1418,8 +1479,11 @@ contract BSX1000xTest is Test {
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         bsx1000x.openPosition(order, openSignature);
 
+        // withdraw all fund
+        bsx1000x.withdrawFund(bsx1000x.fundBalance());
+
         uint128 closePrice = 10_030 * 1e18;
-        int256 closePositionFee = 10 * 1e18;
+        int256 closePositionFee = -10 * 1e18;
         int256 pnl = 30 * 1e18;
         bytes memory closeSignature = _signCloseOrder(signerKey, order);
         vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InsufficientFundBalance.selector));
@@ -1463,6 +1527,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1475,16 +1540,19 @@ contract BSX1000xTest is Test {
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + credit,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + credit + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1531,6 +1599,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1543,16 +1612,19 @@ contract BSX1000xTest is Test {
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1599,6 +1671,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1611,16 +1684,19 @@ contract BSX1000xTest is Test {
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore - uint256(pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1667,6 +1743,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1689,16 +1766,19 @@ contract BSX1000xTest is Test {
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(-pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(-pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available - uint256(-pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
@@ -1745,6 +1825,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
         uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1767,16 +1848,19 @@ contract BSX1000xTest is Test {
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 lockedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
-        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(-pnl) + uint256(closePositionFee));
+        assertEq(fundBalanceAfter, fundBalanceBefore + uint256(-pnl) + uint256(closePositionFee) + lockedFund);
+        assertEq(lockedFundAfter, lockedFundBefore - lockedFund);
         assertEq(
             accountBalanceAfter.available,
             accountBalanceBefore.available - uint256(-pnl) - uint256(closePositionFee) + order.margin
         );
         assertEq(accountBalanceAfter.locked, 0);
         assertEq(
-            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked,
-            fundBalanceAfter + accountBalanceAfter.available
+            fundBalanceBefore + accountBalanceBefore.available + accountBalanceBefore.locked + lockedFundBefore,
+            fundBalanceAfter + accountBalanceAfter.available + lockedFundAfter
         );
 
         // check position state
