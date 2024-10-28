@@ -302,6 +302,22 @@ contract ExchangeTest is Test {
         assertEq(ERC20Simple(WETH9).balanceOf(address(exchange)), amount);
     }
 
+    function test_deposit_withNativeETH_revertsIfInsufficientEth() public {
+        bytes memory code = address(new WETH9Mock()).code;
+        vm.etch(WETH9, code);
+
+        vm.prank(sequencer);
+        exchange.addSupportedToken(NATIVE_ETH);
+
+        address account = makeAddr("account");
+        uint128 depositAmount = 4 ether;
+        vm.deal(account, depositAmount);
+
+        vm.prank(account);
+        vm.expectRevert(Errors.Exchange_InvalidEthAmount.selector);
+        exchange.deposit{value: 3 ether}(NATIVE_ETH, depositAmount);
+    }
+
     function test_deposit_revertsIfZeroAmount() public {
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
         exchange.deposit(address(collateralToken), 0);

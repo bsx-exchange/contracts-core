@@ -36,6 +36,9 @@ library Errors {
     /// @notice Thrown when token is not supported
     error Exchange_TokenNotSupported(address token);
 
+    /// @notice Thrown when msg.value is not equal to deposit amount
+    error Exchange_InvalidEthAmount();
+
     /// @notice Thrown when processing a batch of operations is paused
     error Exchange_PausedProcessBatch();
 

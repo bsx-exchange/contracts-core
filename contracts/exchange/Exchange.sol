@@ -124,6 +124,7 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable {
 
         if (token == NATIVE_ETH) {
             token = WETH9;
+            if (msg.value != amount) revert Errors.Exchange_InvalidEthAmount();
             IWETH9(token).deposit{value: amount}();
         } else {
             (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
