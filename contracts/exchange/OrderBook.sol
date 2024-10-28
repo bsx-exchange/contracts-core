@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {Access} from "./access/Access.sol";
@@ -19,7 +18,7 @@ import {OrderSide} from "./share/Enums.sol";
 /// @title Orderbook contract
 /// @notice This contract is used for matching orders
 /// @dev This contract is upgradeable
-contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
+contract OrderBook is IOrderBook, Initializable {
     using MathHelper for int128;
     using MathHelper for uint128;
     using Percentage for uint128;
@@ -38,25 +37,25 @@ contract OrderBook is IOrderBook, Initializable, OwnableUpgradeable {
     address private collateralToken;
     int256 private totalSequencerFee;
 
-    function initialize(
-        address _clearingService,
-        address _spotEngine,
-        address _perpEngine,
-        address _access,
-        address _collateralToken
-    ) public initializer {
-        if (
-            _clearingService == address(0) || _spotEngine == address(0) || _perpEngine == address(0)
-                || _access == address(0) || _collateralToken == address(0)
-        ) {
-            revert Errors.ZeroAddress();
-        }
-        clearingService = IClearingService(_clearingService);
-        spotEngine = ISpot(_spotEngine);
-        perpEngine = IPerp(_perpEngine);
-        access = Access(_access);
-        collateralToken = _collateralToken;
-    }
+    // function initialize(
+    //     address _clearingService,
+    //     address _spotEngine,
+    //     address _perpEngine,
+    //     address _access,
+    //     address _collateralToken
+    // ) public initializer {
+    //     if (
+    //         _clearingService == address(0) || _spotEngine == address(0) || _perpEngine == address(0)
+    //             || _access == address(0) || _collateralToken == address(0)
+    //     ) {
+    //         revert Errors.ZeroAddress();
+    //     }
+    //     clearingService = IClearingService(_clearingService);
+    //     spotEngine = ISpot(_spotEngine);
+    //     perpEngine = IPerp(_perpEngine);
+    //     access = Access(_access);
+    //     collateralToken = _collateralToken;
+    // }
 
     modifier onlySequencer() {
         if (msg.sender != access.getExchange()) {

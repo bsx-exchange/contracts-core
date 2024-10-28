@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.25 <0.9.0;
 
-import {Test} from "forge-std/Test.sol";
-import {StdStorage, stdStorage} from "forge-std/Test.sol";
+import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
@@ -43,45 +42,29 @@ contract OrderbookTest is Test {
 
     function setUp() public {
         access = new Access();
-        access.initialize(address(this));
-
-        // migrate new admin role
-        access.migrateAdmin();
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+            address(this)
+        ).checked_write(true);
 
         access.setExchange(exchange);
 
         spotEngine = new Spot();
-        spotEngine.initialize(address(access));
+        stdstore.target(address(spotEngine)).sig("access()").checked_write(address(access));
 
         perpEngine = new Perp();
-        perpEngine.initialize(address(access));
+        stdstore.target(address(perpEngine)).sig("access()").checked_write(address(access));
 
         clearingService = new ClearingService();
-        clearingService.initialize(address(access));
+        stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
 
         orderbook = new OrderBook();
-        orderbook.initialize(address(clearingService), address(spotEngine), address(perpEngine), address(access), token);
+        stdstore.target(address(orderbook)).sig("clearingService()").checked_write(address(clearingService));
+        stdstore.target(address(orderbook)).sig("perpEngine()").checked_write(address(perpEngine));
+        stdstore.target(address(orderbook)).sig("spotEngine()").checked_write(address(spotEngine));
+        stdstore.target(address(orderbook)).sig("access()").checked_write(address(access));
+        stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(token);
+
         access.setOrderBook(address(orderbook));
-    }
-
-    function test_initialize() public view {
-        assertEq(address(orderbook.clearingService()), address(clearingService));
-        assertEq(address(orderbook.spotEngine()), address(spotEngine));
-        assertEq(address(orderbook.perpEngine()), address(perpEngine));
-        assertEq(address(orderbook.access()), address(access));
-        assertEq(orderbook.getCollateralToken(), token);
-    }
-
-    function test_initialize_revertsIfSetZeroAddr() public {
-        OrderBook _orderbook = new OrderBook();
-        address mockAddr = makeAddr("mockAddr");
-        address[5] memory addresses = [mockAddr, mockAddr, mockAddr, mockAddr, mockAddr];
-        for (uint256 i = 0; i < 5; i++) {
-            addresses[i] = address(0);
-            vm.expectRevert(Errors.ZeroAddress.selector);
-            _orderbook.initialize(addresses[0], addresses[1], addresses[2], addresses[3], addresses[4]);
-            addresses[i] = mockAddr;
-        }
     }
 
     function test_claimSequencerFees() public {

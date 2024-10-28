@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.25 <0.9.0;
 
-import {Test} from "forge-std/Test.sol";
+import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
@@ -10,6 +10,8 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 
 contract ClearingServiceTest is Test {
+    using stdStorage for StdStorage;
+
     address private exchange = makeAddr("exchange");
     address private account = makeAddr("account");
     address private token = makeAddr("token");
@@ -21,35 +23,26 @@ contract ClearingServiceTest is Test {
 
     function setUp() public {
         access = new Access();
-        access.initialize(address(this));
-
-        // migrate new admin role
-        access.migrateAdmin();
-
-        access.setExchange(exchange);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+            address(this)
+        ).checked_write(true);
 
         spotEngine = new Spot();
-        spotEngine.initialize(address(access));
-        access.setSpotEngine(address(spotEngine));
+        stdstore.target(address(spotEngine)).sig("access()").checked_write(address(access));
 
         clearingService = new ClearingService();
-        clearingService.initialize(address(access));
+        stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
 
         orderbook = new OrderBook();
-        orderbook.initialize(address(clearingService), address(spotEngine), makeAddr("perp"), address(access), token);
+        stdstore.target(address(orderbook)).sig("clearingService()").checked_write(address(clearingService));
+        stdstore.target(address(orderbook)).sig("spotEngine()").checked_write(address(spotEngine));
+        stdstore.target(address(orderbook)).sig("access()").checked_write(address(access));
+        stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(token);
+
+        access.setExchange(exchange);
         access.setOrderBook(address(orderbook));
-
+        access.setSpotEngine(address(spotEngine));
         access.setClearingService(address(clearingService));
-    }
-
-    function test_initialize() public view {
-        assertEq(address(clearingService.access()), address(access));
-    }
-
-    function test_initialize_revertsIfSetZeroAddr() public {
-        ClearingService _clearingService = new ClearingService();
-        vm.expectRevert(Errors.ZeroAddress.selector);
-        _clearingService.initialize(address(0));
     }
 
     function test_deposit() public {

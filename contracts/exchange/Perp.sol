@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {Access} from "./access/Access.sol";
@@ -11,18 +10,18 @@ import {Errors} from "./lib/Errors.sol";
 /// @title Perp contract
 /// @notice Manage openning positions
 /// @dev This contract is upgradeable
-contract Perp is IPerp, Initializable, OwnableUpgradeable {
+contract Perp is IPerp, Initializable {
     Access public access;
 
     mapping(address account => mapping(uint8 productId => Balance balance)) public balance;
     mapping(uint8 productId => FundingRate marketMetrics) public fundingRate;
 
-    function initialize(address _access) public initializer {
-        if (_access == address(0)) {
-            revert Errors.ZeroAddress();
-        }
-        access = Access(_access);
-    }
+    // function initialize(address _access) public initializer {
+    //     if (_access == address(0)) {
+    //         revert Errors.ZeroAddress();
+    //     }
+    //     access = Access(_access);
+    // }
 
     modifier onlySequencer() {
         if (

@@ -3,8 +3,7 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {Test} from "forge-std/Test.sol";
-import {StdStorage, stdStorage} from "forge-std/Test.sol";
+import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Helper} from "../Helper.sol";
 import {ERC1271} from "../mock/ERC1271.sol";
@@ -24,7 +23,7 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
-import {MAX_REBATE_RATE, MAX_WITHDRAWAL_FEE, NATIVE_ETH, WETH9} from "contracts/exchange/share/Constants.sol";
+import {MAX_REBATE_RATE, NATIVE_ETH, WETH9} from "contracts/exchange/share/Constants.sol";
 import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
@@ -84,32 +83,29 @@ contract ExchangeTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        access.initialize(sequencer);
-
-        // migrate new role
-        access.migrateAdmin();
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+            sequencer
+        ).checked_write(true);
         access.grantRole(access.GENERAL_ROLE(), sequencer);
         access.grantRole(access.BATCH_OPERATOR_ROLE(), sequencer);
         access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), sequencer);
         access.grantRole(access.SIGNER_OPERATOR_ROLE(), sequencer);
 
         clearingService = new ClearingService();
-        clearingService.initialize(address(access));
+        stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
 
         perpEngine = new Perp();
-        perpEngine.initialize(address(access));
+        stdstore.target(address(perpEngine)).sig("access()").checked_write(address(access));
 
         spotEngine = new Spot();
-        spotEngine.initialize(address(access));
+        stdstore.target(address(spotEngine)).sig("access()").checked_write(address(access));
 
         orderbook = new OrderBook();
-        orderbook.initialize(
-            address(clearingService),
-            address(spotEngine),
-            address(perpEngine),
-            address(access),
-            address(collateralToken)
-        );
+        stdstore.target(address(orderbook)).sig("clearingService()").checked_write(address(clearingService));
+        stdstore.target(address(orderbook)).sig("spotEngine()").checked_write(address(spotEngine));
+        stdstore.target(address(orderbook)).sig("perpEngine()").checked_write(address(perpEngine));
+        stdstore.target(address(orderbook)).sig("access()").checked_write(address(access));
+        stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(address(collateralToken));
 
         exchange = new Exchange();
         bytes memory code = address(new UniversalSigValidator()).code;

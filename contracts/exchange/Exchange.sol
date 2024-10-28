@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -33,7 +31,7 @@ import {OrderSide} from "./share/Enums.sol";
 /// @notice This contract is entry point of the exchange
 /// @dev This contract is upgradeable
 // solhint-disable max-states-count
-contract Exchange is IExchange, Initializable, EIP712Upgradeable, OwnableUpgradeable, ReentrancyGuardUpgradeable {
+contract Exchange is IExchange, Initializable, EIP712Upgradeable {
     using EnumerableSet for EnumerableSet.AddressSet;
     using LibOrder for LibOrder.Order;
     using SafeERC20 for IERC20Extend;

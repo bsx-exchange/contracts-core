@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {Access} from "./access/Access.sol";
@@ -14,18 +13,18 @@ import {MathHelper} from "./lib/MathHelper.sol";
 /// @title Clearinghouse contract
 /// @notice Manage insurance fund and spot balance
 /// @dev This contract is upgradeable
-contract ClearingService is IClearingService, Initializable, OwnableUpgradeable {
+contract ClearingService is IClearingService, Initializable {
     using MathHelper for uint256;
 
     Access public access;
     uint256 private insuranceFundBalance;
 
-    function initialize(address _access) public initializer {
-        if (_access == address(0)) {
-            revert Errors.ZeroAddress();
-        }
-        access = Access(_access);
-    }
+    // function initialize(address _access) public initializer {
+    //     if (_access == address(0)) {
+    //         revert Errors.ZeroAddress();
+    //     }
+    //     access = Access(_access);
+    // }
 
     modifier onlySequencer() {
         if (msg.sender != access.getExchange() && msg.sender != access.getOrderBook()) {

@@ -2,12 +2,14 @@
 pragma solidity >=0.8.25 <0.9.0;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {Test} from "forge-std/Test.sol";
+import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 
 contract AccessTest is Test {
+    using stdStorage for StdStorage;
+
     address private admin = makeAddr("admin");
     address private account = makeAddr("account");
     Access private access;
@@ -16,21 +18,9 @@ contract AccessTest is Test {
 
     function setUp() public {
         access = new Access();
-        access.initialize(admin);
 
-        // migrate new role
-        vm.prank(admin);
-        access.migrateAdmin();
-    }
-
-    function test_migrate() public view {
-        assertEq(access.hasRole(access.ADMIN_ROLE(), admin), true);
-    }
-
-    function test_initialize_revertsIfSetZeroAddr() public {
-        Access _access = new Access();
-        vm.expectRevert(Errors.ZeroAddress.selector);
-        _access.initialize(address(0));
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(admin)
+            .checked_write(true);
     }
 
     function test_grantRole() public {

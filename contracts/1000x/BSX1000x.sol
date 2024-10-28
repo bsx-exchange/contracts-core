@@ -68,17 +68,17 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         _;
     }
 
-    function initialize(string memory name, string memory version, address _access, address _collateralToken)
-        external
-        initializer
-    {
-        __EIP712_init(name, version);
-        if (_access == address(0) || _collateralToken == address(0)) {
-            revert Errors.ZeroAddress();
-        }
-        access = Access(_access);
-        collateralToken = IERC20Extend(_collateralToken);
-    }
+    // function initialize(string memory name, string memory version, address _access, address _collateralToken)
+    //     external
+    //     initializer
+    // {
+    //     __EIP712_init(name, version);
+    //     if (_access == address(0) || _collateralToken == address(0)) {
+    //         revert Errors.ZeroAddress();
+    //     }
+    //     access = Access(_access);
+    //     collateralToken = IERC20Extend(_collateralToken);
+    // }
 
     /// @inheritdoc IBSX1000x
     function deposit(uint256 amount) public {

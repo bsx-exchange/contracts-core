@@ -52,23 +52,22 @@ contract ExchangeTest is Test {
         vm.startPrank(admin);
 
         access = new Access();
-        access.initialize(admin);
-
-        // migrate new role
-        access.migrateAdmin();
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(admin)
+            .checked_write(true);
         access.grantRole(access.GENERAL_ROLE(), admin);
         access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), liquidator);
 
         clearingService = new ClearingService();
-        clearingService.initialize(address(access));
+        stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
 
         spotEngine = new Spot();
-        spotEngine.initialize(address(access));
+        stdstore.target(address(spotEngine)).sig("access()").checked_write(address(access));
 
         orderbook = new OrderBook();
-        orderbook.initialize(
-            address(clearingService), address(spotEngine), makeAddr("perp"), address(access), address(underlyingAsset)
-        );
+        stdstore.target(address(orderbook)).sig("clearingService()").checked_write(address(clearingService));
+        stdstore.target(address(orderbook)).sig("spotEngine()").checked_write(address(spotEngine));
+        stdstore.target(address(orderbook)).sig("access()").checked_write(address(access));
+        stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(address(underlyingAsset));
 
         exchange = new Exchange();
 

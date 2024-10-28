@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 import {Access} from "./access/Access.sol";
@@ -11,17 +10,17 @@ import {Errors} from "./lib/Errors.sol";
 /// @title Spot contract
 /// @notice Manage the token balance states
 /// @dev This contract is upgradeable
-contract Spot is ISpot, Initializable, OwnableUpgradeable {
+contract Spot is ISpot, Initializable {
     mapping(address account => mapping(address token => Balance balance)) public balance;
     mapping(address token => uint256 totalBalance) public totalBalancePerToken;
     Access public access;
 
-    function initialize(address _access) public initializer {
-        if (_access == address(0)) {
-            revert Errors.ZeroAddress();
-        }
-        access = Access(_access);
-    }
+    // function initialize(address _access) public initializer {
+    //     if (_access == address(0)) {
+    //         revert Errors.ZeroAddress();
+    //     }
+    //     access = Access(_access);
+    // }
 
     modifier onlySequencer() {
         if (

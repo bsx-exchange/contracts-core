@@ -3,7 +3,7 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {Test} from "forge-std/Test.sol";
+import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Helper} from "../Helper.sol";
 import {ERC1271} from "../mock/ERC1271.sol";
@@ -17,6 +17,7 @@ import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Mi
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 
 contract BSX1000xTest is Test {
+    using stdStorage for StdStorage;
     using Helper for uint256;
 
     Access private access;
@@ -30,10 +31,9 @@ contract BSX1000xTest is Test {
 
     function setUp() public {
         access = new Access();
-        access.initialize(address(this));
-
-        // migrate new admin role
-        access.migrateAdmin();
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+            address(this)
+        ).checked_write(true);
         access.grantRole(access.BSX1000_OPERATOR_ROLE(), address(this));
         access.grantRole(access.GENERAL_ROLE(), address(this));
 
@@ -42,18 +42,8 @@ contract BSX1000xTest is Test {
         collateralToken = new ERC20Simple(6);
 
         bsx1000x = new BSX1000x();
-        bsx1000x.initialize("BSX1000x", "1", address(access), address(collateralToken));
-    }
-
-    function test_initialize() public view {
-        assertEq(address(bsx1000x.access()), address(access));
-        assertEq(address(bsx1000x.collateralToken()), address(collateralToken));
-    }
-
-    function test_initialize_revertsIfSetZeroAddr() public {
-        BSX1000x _bsx1000x = new BSX1000x();
-        vm.expectRevert(Errors.ZeroAddress.selector);
-        _bsx1000x.initialize("BSX1000x", "1", address(0), address(0));
+        stdstore.target(address(bsx1000x)).sig("access()").checked_write(address(access));
+        stdstore.target(address(bsx1000x)).sig("collateralToken()").checked_write(address(collateralToken));
     }
 
     function test_deposit() public {
