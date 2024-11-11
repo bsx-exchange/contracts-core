@@ -2,10 +2,11 @@
 pragma solidity ^0.8.23;
 
 import {ILiquidation} from "./ILiquidation.sol";
+import {ISwap} from "./ISwap.sol";
 
 /// @title Exchange
 /// @notice Entrypoint of the system
-interface IExchange is ILiquidation {
+interface IExchange is ILiquidation, ISwap {
     /// @notice Emitted when a token is added to the supported tokens list
     /// @param token Token address which is added
     event SupportedTokenAdded(address indexed token);

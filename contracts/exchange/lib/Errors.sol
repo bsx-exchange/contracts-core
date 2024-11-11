@@ -18,6 +18,9 @@ library Errors {
                                       EXCHANGE
     //////////////////////////////////////////////////////////////////////////*/
 
+    /// @notice Thrown when caller is not this contract
+    error Exchange_InternalCall();
+
     /// @notice Thrown when setting the zero amount
     error Exchange_ZeroAmount();
 
@@ -38,6 +41,9 @@ library Errors {
 
     /// @notice Thrown when msg.value is not equal to deposit amount
     error Exchange_InvalidEthAmount();
+
+    /// @notice Thrown when insufficient ETH is sent
+    error Exchange_InsufficientEth();
 
     /// @notice Thrown when processing a batch of operations is paused
     error Exchange_PausedProcessBatch();
@@ -100,9 +106,6 @@ library Errors {
     /// @notice Thrown when withdrawing with used nonce
     error Exchange_Withdraw_NonceUsed(address account, uint64 nonce);
 
-    /// @notice Thrown when caller is not this contract
-    error Exchange_Liquidation_InternalCall();
-
     /// @notice Thrown when account balance in not positive
     error Exchange_Liquidation_InvalidBalance(address account, address token, int256 balance);
 
@@ -112,9 +115,12 @@ library Errors {
     /// @notice Thrown when asset is not whitelisted
     error Exchange_Liquidation_InvalidAsset(address asset);
 
-    /// @notice Thrown when invalid command
+    /// @notice Thrown when empty commands submitted to Universal Router
+    error Exchange_UniversalRouter_EmptyCommand();
+
+    /// @notice Thrown when commands submitted to Universal Router are not whitelisted
     /// Valid commands include V3_SWAP_EXACT_IN, V3_SWAP_EXACT_OUT, V2_SWAP_EXACT_IN, V2_SWAP_EXACT_OUT
-    error Exchange_Liquidation_InvalidCommand(uint256 command);
+    error Exchange_UniversalRouter_InvalidCommand(uint256 command);
 
     /// @notice Thrown when liquidating with used nonce
     error Exchange_Liquidation_NonceUsed(address account, uint256 nonce);
@@ -122,10 +128,29 @@ library Errors {
     /// @notice Thrown when empty executions submitted to Universal Router
     error Exchange_Liquidation_EmptyExecution();
 
-    /// @notice Thrown when empty commands submitted to Universal Router
-    error Exchange_Liquidation_EmptyCommand();
-
+    /// @notice Thrown when exceeding maximum liquidation fee pips
     error Exchange_Liquidation_ExceededMaxLiquidationFeePips(uint256 feePips);
+
+    /// @notice Thrown when swapping with used nonce
+    error Exchange_Swap_NonceUsed(address account, uint256 nonce);
+
+    /// @notice Thrown when swapping with invalid asset
+    error Exchange_Swap_InvalidAsset();
+
+    /// @notice Thrown when swapping with same asset
+    error Exchange_Swap_SameAsset();
+
+    /// @notice Thrown when requested amount exceeds the balance
+    error Exchange_Swap_ExceededBalance(address account, address token, uint256 amountX18, int256 balanceX18);
+
+    /// @notice Thrown when swap fee exceeds the maximum fee
+    error Exchange_Swap_ExceededMaxFee(uint256 feeX18, uint256 maxFeeX18);
+
+    /// @notice Thrown when swap amount in mismatch
+    error Exchange_Swap_AmountInMismatch(uint256 swappedRawAmountIn, uint256 requestRawAmountIn);
+
+    /// @notice Thrown when swap amount exceeds the maximum amount
+    error Exchange_Swap_AmountOutTooLittle(uint256 amountOutX18, uint256 minAmountOutX18);
 
     /*//////////////////////////////////////////////////////////////////////////
                                     CLEARING SERVICE

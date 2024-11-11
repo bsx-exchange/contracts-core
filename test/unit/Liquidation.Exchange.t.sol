@@ -2,10 +2,10 @@
 pragma solidity >=0.8.25 <0.9.0;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {Test} from "forge-std/Test.sol";
-import {StdStorage, stdStorage} from "forge-std/Test.sol";
+import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
-import {ERC20, ERC20Simple} from "../mock/ERC20Simple.sol";
+import {ERC20Simple} from "../mock/ERC20Simple.sol";
+import {UniversalRouter} from "../mock/UniversalRouter.sol";
 
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange} from "contracts/exchange/Exchange.sol";
@@ -15,24 +15,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {ILiquidation} from "contracts/exchange/interfaces/ILiquidation.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 
-contract MockUniversalRouter {
-    ERC20Simple private tokenOut;
-    address private exchange;
-
-    constructor(address _exchange, ERC20Simple _tokenOut) {
-        tokenOut = _tokenOut;
-        exchange = _exchange;
-    }
-
-    function execute(bytes calldata, bytes[] calldata mockInputs) external {
-        (address tokenIn, uint256 amountIn, uint256 amountOut) = abi.decode(mockInputs[0], (address, uint256, uint256));
-        ERC20(tokenIn).transferFrom(exchange, address(this), amountIn);
-        tokenOut.mint(address(this), amountOut);
-        tokenOut.transfer(exchange, amountOut);
-    }
-}
-
-contract ExchangeTest is Test {
+contract LiquidationExchangeTest is Test {
     using stdStorage for StdStorage;
 
     address private admin = makeAddr("admin");
@@ -46,7 +29,7 @@ contract ExchangeTest is Test {
 
     ERC20Simple private underlyingAsset = new ERC20Simple(6);
 
-    MockUniversalRouter private mockUniversalRouter;
+    UniversalRouter private mockUniversalRouter;
 
     function setUp() public {
         vm.startPrank(admin);
@@ -76,7 +59,7 @@ contract ExchangeTest is Test {
         access.setOrderBook(address(orderbook));
         access.setSpotEngine(address(spotEngine));
 
-        mockUniversalRouter = new MockUniversalRouter(address(exchange), underlyingAsset);
+        mockUniversalRouter = new UniversalRouter(address(exchange));
 
         stdstore.target(address(exchange)).sig("access()").checked_write(address(access));
         stdstore.target(address(exchange)).sig("book()").checked_write(address(orderbook));
@@ -111,7 +94,7 @@ contract ExchangeTest is Test {
         bytes memory commands = abi.encodePacked(bytes1(0x00));
         bytes[] memory inputs = new bytes[](1);
         // mock input
-        inputs[0] = abi.encode(address(liquidationAsset), liquidationAmount, receivedAmount);
+        inputs[0] = abi.encode(address(liquidationAsset), liquidationAmount, address(underlyingAsset), receivedAmount);
 
         ILiquidation.ExecutionParams[] memory executions = new ILiquidation.ExecutionParams[](1);
         executions[0] = ILiquidation.ExecutionParams({
@@ -226,10 +209,10 @@ contract ExchangeTest is Test {
 
         bytes memory commands = abi.encodePacked(bytes1(0x00));
         bytes[] memory inputs1 = new bytes[](1);
-        inputs1[0] = abi.encode(address(liquidationAsset), 1e8, 1e6);
+        inputs1[0] = abi.encode(address(liquidationAsset), 1e8, address(underlyingAsset), 1e6);
 
         bytes[] memory inputs2 = new bytes[](1);
-        inputs2[0] = abi.encode(address(liquidationAsset), 1e8, 100e6);
+        inputs2[0] = abi.encode(address(liquidationAsset), 1e8, address(underlyingAsset), 100e6);
 
         ILiquidation.ExecutionParams[] memory executions = new ILiquidation.ExecutionParams[](2);
         executions[0] = ILiquidation.ExecutionParams({
@@ -260,7 +243,7 @@ contract ExchangeTest is Test {
         exchange.liquidateCollateralBatch(params);
     }
 
-    function test_liquidateCollaterals_revertIfCallerIsNotLiquidator() public {
+    function test_liquidateCollateralBatch_revertIfCallerIsNotLiquidator() public {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IAccessControl.AccessControlUnauthorizedAccount.selector,
@@ -370,7 +353,7 @@ contract ExchangeTest is Test {
 
     function test_innerLiquidation_revertIfCallerNotContract() public {
         ILiquidation.LiquidationParams memory emptyParams;
-        vm.expectRevert(Errors.Exchange_Liquidation_InternalCall.selector);
+        vm.expectRevert(Errors.Exchange_InternalCall.selector);
         exchange.innerLiquidation(emptyParams);
     }
 
@@ -447,7 +430,7 @@ contract ExchangeTest is Test {
         spotEngine.modifyAccount(deltas);
 
         vm.prank(address(exchange));
-        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Liquidation_EmptyCommand.selector));
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_UniversalRouter_EmptyCommand.selector));
         exchange.innerLiquidation(params);
     }
 
@@ -472,7 +455,7 @@ contract ExchangeTest is Test {
         spotEngine.modifyAccount(deltas);
 
         vm.prank(address(exchange));
-        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Liquidation_InvalidCommand.selector, 3));
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_UniversalRouter_InvalidCommand.selector, 3));
         exchange.innerLiquidation(params);
     }
 }

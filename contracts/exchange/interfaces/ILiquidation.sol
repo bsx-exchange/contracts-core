@@ -68,4 +68,10 @@ interface ILiquidation {
     /// @dev Can only be called by an address with the COLLATERAL_OPERATOR_ROLE
     /// @param params The array of liquidation parameters for each account
     function liquidateCollateralBatch(LiquidationParams[] calldata params) external;
+
+    /// @notice Liquidates all collaterals of an account.
+    /// @dev Internal function to catch exceptions if fail to liquidate an account
+    /// Only called by this contract.
+    /// @param params The liquidation parameters for the account
+    function innerLiquidation(LiquidationParams calldata params) external returns (AccountLiquidationStatus status);
 }

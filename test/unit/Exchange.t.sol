@@ -2646,9 +2646,11 @@ contract ExchangeTest is Test {
 
         vm.startPrank(sequencer);
 
+        exchange.addSupportedToken(NATIVE_ETH);
         exchange.addSupportedToken(address(token1));
         exchange.addSupportedToken(address(token2));
 
+        deal(address(exchange), 1 ether);
         token1.mint(address(exchange), uint128(token1CollectedFee).convertFrom18D(token1.decimals()));
         token2.mint(address(exchange), uint128(token2CollectedFee).convertFrom18D(token2.decimals()));
         collateralToken.mint(
@@ -2665,6 +2667,7 @@ contract ExchangeTest is Test {
         emit IExchange.ClaimSequencerFees(sequencer, address(collateralToken), orderbookCollectedSequencerFees);
         exchange.claimSequencerFees();
 
+        assertEq(address(exchange).balance, 1 ether);
         assertEq(
             token1.balanceOf(feeRecipient),
             token1BalanceBefore + uint128(token1CollectedFee).convertFrom18D(token1.decimals())

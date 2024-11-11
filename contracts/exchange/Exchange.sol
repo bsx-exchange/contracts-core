@@ -8,30 +8,27 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import {Access} from "./access/Access.sol";
-import {IClearingService} from "./interfaces/IClearingService.sol";
-import {IExchange, ILiquidation} from "./interfaces/IExchange.sol";
+import {ExchangeStorage} from "./ExchangeStorage.sol";
+import {IExchange, ILiquidation, ISwap} from "./interfaces/IExchange.sol";
 import {IOrderBook} from "./interfaces/IOrderBook.sol";
-import {IPerp} from "./interfaces/IPerp.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {IERC20Extend} from "./interfaces/external/IERC20Extend.sol";
 import {IERC3009Minimal} from "./interfaces/external/IERC3009Minimal.sol";
-import {IUniversalRouter} from "./interfaces/external/IUniversalRouter.sol";
 import {IUniversalSigValidator} from "./interfaces/external/IUniversalSigValidator.sol";
 import {IWETH9} from "./interfaces/external/IWETH9.sol";
-import {Commands} from "./lib/Commands.sol";
 import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {MAX_LIQUIDATION_FEE_RATE, MAX_REBATE_RATE, NATIVE_ETH, WETH9} from "./share/Constants.sol";
+import {LiquidationLogic} from "./lib/logic/LiquidationLogic.sol";
+import {SwapLogic} from "./lib/logic/SwapLogic.sol";
+import {MAX_REBATE_RATE, NATIVE_ETH, WETH9} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
 
 /// @title Exchange contract
 /// @notice This contract is entry point of the exchange
 /// @dev This contract is upgradeable
-// solhint-disable max-states-count
-contract Exchange is IExchange, Initializable, EIP712Upgradeable {
+contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchange {
     using EnumerableSet for EnumerableSet.AddressSet;
     using LibOrder for LibOrder.Order;
     using SafeERC20 for IERC20Extend;
@@ -41,34 +38,11 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable {
     using MathHelper for int128;
     using MathHelper for int256;
 
-    IClearingService public clearingService;
-    ISpot public spotEngine;
-    IPerp public perpEngine;
-    IOrderBook public book;
-    Access public access;
-
-    EnumerableSet.AddressSet private supportedTokens;
-    mapping(address account => mapping(address signer => bool isAuthorized)) private _signingWallets;
-    mapping(address token => uint256 amount) private _collectedFee;
-    mapping(address account => mapping(uint64 registerSignerNonce => bool used)) public isRegisterSignerNonceUsed;
-    mapping(address account => mapping(uint256 liquidationNonce => bool liquidated)) public isLiquidationNonceUsed;
-
-    address public universalRouter;
-    uint256 private _lastResetBlockNumber; // deprecated
-    int256 private _sequencerFee;
-    EnumerableSet.AddressSet private _userWallets; // deprecated
-    uint256 public lastFundingRateUpdate;
-    uint32 public executedTransactionCounter;
-    address public feeRecipientAddress;
-    bool private _isTwoPhaseWithdrawEnabled; // deprecated
-    bool public canDeposit;
-    bool public canWithdraw;
-    bool public pauseBatchProcess;
-    mapping(address account => mapping(uint64 withdrawNonce => bool used)) public isWithdrawNonceUsed;
-    mapping(address account => bool isRequesting) private _isRequestingTwoPhaseWithdraw; // deprecated
-
     bytes32 public constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
     bytes32 public constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
+    bytes32 public constant SWAP_TYPEHASH = keccak256(
+        "Swap(address account,address assetIn,uint256 amountIn,address assetOut,uint256 minAmountOut,uint256 nonce)"
+    );
     bytes32 public constant WITHDRAW_TYPEHASH =
         keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
     bytes32 public constant ORDER_TYPEHASH =
@@ -80,6 +54,13 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable {
         if (!access.hasRole(role, account)) {
             revert IAccessControl.AccessControlUnauthorizedAccount(account, role);
         }
+    }
+
+    modifier internalCall() {
+        if (msg.sender != address(this)) {
+            revert Errors.Exchange_InternalCall();
+        }
+        _;
     }
 
     modifier onlyRole(bytes32 role) {
@@ -208,6 +189,10 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable {
 
         for (uint256 i = 0; i < supportedTokens.length(); ++i) {
             address token = supportedTokens.at(i);
+            if (token == NATIVE_ETH) {
+                continue;
+            }
+
             uint256 totalFee = _collectedFee[token];
             if (token == underlyingAsset) {
                 totalFee += book.claimSequencerFees().safeUInt256();
@@ -238,134 +223,63 @@ contract Exchange is IExchange, Initializable, EIP712Upgradeable {
         external
         onlyRole(access.COLLATERAL_OPERATOR_ROLE())
     {
-        for (uint256 i = 0; i < params.length; i++) {
-            address account = params[i].account;
-            uint256 nonce = params[i].nonce;
-            uint16 feePips = params[i].feePips;
-
-            if (params[i].executions.length == 0) {
-                revert Errors.Exchange_Liquidation_EmptyExecution();
-            }
-            if (feePips > MAX_LIQUIDATION_FEE_RATE) {
-                revert Errors.Exchange_Liquidation_ExceededMaxLiquidationFeePips(feePips);
-            }
-            if (isLiquidationNonceUsed[account][nonce]) {
-                revert Errors.Exchange_Liquidation_NonceUsed(account, nonce);
-            }
-            isLiquidationNonceUsed[account][nonce] = true;
-
-            try this.innerLiquidation(params[i]) returns (AccountLiquidationStatus status) {
-                // mark nonce as used
-                emit LiquidateAccount(account, nonce, status);
-            } catch {
-                emit LiquidateAccount(account, nonce, AccountLiquidationStatus.Failure);
-            }
-        }
+        LiquidationLogic.liquidateCollateralBatch(isLiquidationNonceUsed, this, params);
     }
 
-    /// @dev Liquidates all collaterals of an account. Only called by this contract.
-    function innerLiquidation(LiquidationParams calldata params) external returns (AccountLiquidationStatus status) {
-        if (msg.sender != address(this)) {
-            revert Errors.Exchange_Liquidation_InternalCall();
-        }
-
-        address account = params.account;
-        uint256 nonce = params.nonce;
-        address underlyingAsset = book.getCollateralToken();
-        uint256 execLen = params.executions.length;
-        uint256 countFailure = 0;
-        for (uint256 i = 0; i < execLen; i++) {
-            ExecutionParams calldata exec = params.executions[i];
-            address liquidationAsset = exec.liquidationAsset;
-
-            if (!supportedTokens.contains(liquidationAsset) || liquidationAsset == underlyingAsset) {
-                revert Errors.Exchange_Liquidation_InvalidAsset(liquidationAsset);
-            }
-
-            // approve tokenIn
-            int256 balanceInX18 = balanceOf(account, liquidationAsset);
-            if (balanceInX18 <= 0) {
-                revert Errors.Exchange_Liquidation_InvalidBalance(account, liquidationAsset, balanceInX18);
-            }
-            uint256 balanceIn = balanceInX18.safeUInt256().convertFromScale(liquidationAsset);
-            IERC20Extend(liquidationAsset).forceApprove(universalRouter, balanceIn);
-
-            // cache tokenIn balance before swap
-            uint256 totalTokenInBefore = IERC20Extend(liquidationAsset).balanceOf(address(this));
-
-            // cache tokenOut balance before swap
-            uint256 totalTokenOutBefore = IERC20Extend(underlyingAsset).balanceOf(address(this));
-
-            // execute swap
-            _checkCommands(exec.commands);
-            try IUniversalRouter(universalRouter).execute(exec.commands, exec.inputs) {
-                // calculate amountIn and check if it exceeds tokenIn balance
-                uint256 totalTokenInAfter = IERC20Extend(liquidationAsset).balanceOf(address(this));
-                uint256 amountIn = totalTokenInBefore - totalTokenInAfter;
-                uint256 amountInX18 = amountIn.convertToScale(liquidationAsset);
-                if (amountIn > balanceIn) {
-                    revert Errors.Exchange_Liquidation_ExceededBalance(
-                        account, liquidationAsset, balanceInX18, amountInX18
-                    );
-                }
-                // withdraw tokenIn
-                clearingService.withdraw(account, amountInX18, liquidationAsset, spotEngine);
-
-                // calculate amountOut
-                uint256 totalTokenOutAfter = IERC20Extend(underlyingAsset).balanceOf(address(this));
-                uint256 amountOut = totalTokenOutAfter - totalTokenOutBefore;
-                uint256 amountOutX18 = amountOut.convertToScale(underlyingAsset);
-
-                uint256 feeX18 = amountOutX18.safeUInt128().calculatePercentage(params.feePips);
-                uint256 netAmountOutX18 = amountOutX18 - feeX18;
-
-                // deposit tokenOut
-                clearingService.depositInsuranceFund(feeX18);
-                clearingService.deposit(account, netAmountOutX18, underlyingAsset, spotEngine);
-
-                emit LiquidateCollateral(
-                    account,
-                    nonce,
-                    liquidationAsset,
-                    CollateralLiquidationStatus.Success,
-                    amountInX18,
-                    netAmountOutX18,
-                    feeX18
-                );
-            } catch {
-                countFailure += 1;
-                emit LiquidateCollateral(account, nonce, liquidationAsset, CollateralLiquidationStatus.Failure, 0, 0, 0);
-            }
-
-            // 7. disapprove tokenIn
-            IERC20Extend(liquidationAsset).forceApprove(universalRouter, 0);
-        }
-
-        if (countFailure == 0) {
-            status = AccountLiquidationStatus.Success;
-        } else if (countFailure == execLen) {
-            status = AccountLiquidationStatus.Failure;
-        } else {
-            status = AccountLiquidationStatus.Partial;
-        }
+    /// @inheritdoc ILiquidation
+    function innerLiquidation(LiquidationParams calldata params)
+        external
+        internalCall
+        returns (AccountLiquidationStatus status)
+    {
+        return LiquidationLogic.executeLiquidation(
+            supportedTokens,
+            LiquidationLogic.LiquidationEngines({
+                orderbook: book,
+                clearingService: clearingService,
+                spotEngine: spotEngine,
+                universalRouter: universalRouter
+            }),
+            params
+        );
     }
 
-    /// @dev Checks if commands are valid
-    function _checkCommands(bytes memory commands) internal pure {
-        if (commands.length == 0) {
-            revert Errors.Exchange_Liquidation_EmptyCommand();
-        }
+    /// @inheritdoc ISwap
+    function swapCollateralBatch(SwapParams[] calldata params) external onlyRole(access.COLLATERAL_OPERATOR_ROLE()) {
+        SwapLogic.swapCollateralBatch(this, params);
+    }
 
-        for (uint256 i = 0; i < commands.length; ++i) {
-            uint256 command = uint8(commands[i] & Commands.COMMAND_TYPE_MASK);
-
-            if (
-                command != Commands.V3_SWAP_EXACT_IN && command != Commands.V2_SWAP_EXACT_IN
-                    && command != Commands.V3_SWAP_EXACT_OUT && command != Commands.V2_SWAP_EXACT_OUT
-            ) {
-                revert Errors.Exchange_Liquidation_InvalidCommand(command);
-            }
+    /// @inheritdoc ISwap
+    function innerSwapWithPermit(SwapParams calldata params) external internalCall returns (uint256 amountOutX18) {
+        // check signature
+        bytes32 swapCollateralHash = _hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    SWAP_TYPEHASH,
+                    params.account,
+                    params.assetIn,
+                    params.amountIn,
+                    params.assetOut,
+                    params.minAmountOut,
+                    params.nonce
+                )
+            )
+        );
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(params.account, swapCollateralHash, params.signature)) {
+            revert Errors.Exchange_InvalidSignature(params.account);
         }
+        isSwapNonceUsed[params.account][params.nonce] = true;
+
+        return SwapLogic.executeSwap(
+            _collectedFee,
+            this,
+            SwapLogic.SwapEngines({
+                clearingService: clearingService,
+                spotEngine: spotEngine,
+                universalRouter: universalRouter
+            }),
+            params
+        );
     }
 
     ///@inheritdoc IExchange
