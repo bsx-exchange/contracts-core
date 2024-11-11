@@ -208,7 +208,7 @@ contract BSX1000xTest is Test {
         bytes32 structHash = keccak256(abi.encode(bsx1000x.WITHDRAW_TYPEHASH(), account, withdrawAmount, nonce));
         bytes memory signature = _signTypedDataHash(accountKey, structHash);
 
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
 
         vm.expectEmit(address(bsx1000x));
         emit IBSX1000x.WithdrawSucceeded(account, nonce, withdrawAmount, fee, initAmount - withdrawAmount);
@@ -217,7 +217,7 @@ contract BSX1000xTest is Test {
         IBSX1000x.Balance memory balance = bsx1000x.getBalance(account);
         assertEq(balance.available, initAmount - withdrawAmount);
         assertEq(balance.locked, 0);
-        assertEq(bsx1000x.fundBalance(), fundBalanceBefore + fee);
+        assertEq(bsx1000x.generalFund(), fundBalanceBefore + fee);
         assertEq(collateralToken.balanceOf(account), (withdrawAmount - fee).convertFrom18D(collateralToken.decimals()));
         assertEq(
             collateralToken.balanceOf(address(bsx1000x)),
@@ -239,7 +239,7 @@ contract BSX1000xTest is Test {
         bytes32 structHash = keccak256(abi.encode(bsx1000x.WITHDRAW_TYPEHASH(), contractAccount, withdrawAmount, nonce));
         bytes memory signature = _signTypedDataHash(ownerKey, structHash);
 
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
 
         vm.expectEmit(address(bsx1000x));
         emit IBSX1000x.WithdrawSucceeded(contractAccount, nonce, withdrawAmount, fee, initAmount - withdrawAmount);
@@ -248,7 +248,7 @@ contract BSX1000xTest is Test {
         IBSX1000x.Balance memory balance = bsx1000x.getBalance(contractAccount);
         assertEq(balance.available, initAmount - withdrawAmount);
         assertEq(balance.locked, 0);
-        assertEq(bsx1000x.fundBalance(), fundBalanceBefore + fee);
+        assertEq(bsx1000x.generalFund(), fundBalanceBefore + fee);
         assertEq(
             collateralToken.balanceOf(contractAccount),
             (withdrawAmount - fee).convertFrom18D(collateralToken.decimals())
@@ -396,7 +396,7 @@ contract BSX1000xTest is Test {
             emit IBSX1000x.DepositFund(amount, totalAmount);
             bsx1000x.depositFund(amount);
 
-            assertEq(bsx1000x.fundBalance(), totalAmount);
+            assertEq(bsx1000x.generalFund(), totalAmount);
             assertEq(collateralToken.balanceOf(address(bsx1000x)), totalAmount.convertFrom18D(tokenDecimals));
         }
     }
@@ -429,7 +429,7 @@ contract BSX1000xTest is Test {
 
             totalAmount -= amount;
             totalRawAmount -= rawAmount;
-            assertEq(bsx1000x.fundBalance(), totalAmount);
+            assertEq(bsx1000x.generalFund(), totalAmount);
             assertEq(collateralToken.balanceOf(address(bsx1000x)), totalRawAmount);
         }
     }
@@ -454,9 +454,172 @@ contract BSX1000xTest is Test {
     }
 
     function test_withdrawFund_revertsIfInsufficientFund() public {
-        uint256 fundBalance = bsx1000x.fundBalance();
+        uint256 fundBalance = bsx1000x.generalFund();
         vm.expectRevert(IBSX1000x.InsufficientFundBalance.selector);
         bsx1000x.withdrawFund(fundBalance + 1);
+    }
+
+    function test_openIsolatedFund() public {
+        uint8[3] memory productIds = [1, 3, 5];
+        bool enabled;
+        uint256 fund;
+
+        for (uint256 i = 0; i < 3; i++) {
+            uint32 productId = productIds[i];
+            (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+            assertEq(enabled, false);
+            assertEq(fund, 0);
+
+            vm.expectEmit();
+            emit IBSX1000x.OpenIsolatedFund(productId);
+            bsx1000x.openIsolatedFund(productId);
+
+            (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+            assertEq(enabled, true);
+            assertEq(fund, 0);
+        }
+
+        uint256[] memory isolatedProducts = bsx1000x.getIsolatedProducts();
+        assertEq(isolatedProducts.length, 3);
+        assertEq(isolatedProducts[0], 1);
+        assertEq(isolatedProducts[1], 3);
+        assertEq(isolatedProducts[2], 5);
+    }
+
+    function test_openIsolatedFund_revertsIfUnauthorizedCaller() public {
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+        vm.prank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
+        bsx1000x.openIsolatedFund(5);
+    }
+
+    function test_closeIsolatedFund() public {
+        uint32 productId = 3;
+        bool enabled;
+        uint256 fund;
+
+        bsx1000x.openIsolatedFund(productId);
+        uint256 amount = 1_000_000_000 * 1e18;
+        _depositIsolatedFund(productId, amount);
+        uint256 generalFundBefore = bsx1000x.generalFund();
+
+        (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+        assertEq(enabled, true);
+        assertEq(fund, amount);
+        assertEq(bsx1000x.generalFund(), generalFundBefore);
+
+        vm.expectEmit();
+        emit IBSX1000x.CloseIsolatedFund(productId);
+        emit IBSX1000x.DepositFund(productId, amount);
+        bsx1000x.closeIsolatedFund(productId);
+
+        (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+        assertEq(enabled, false);
+        assertEq(fund, 0);
+
+        assertEq(bsx1000x.generalFund(), generalFundBefore + amount);
+    }
+
+    function test_closeIsolatedFund_revertsIfUnauthorizedCaller() public {
+        address malicious = makeAddr("malicious");
+        bytes32 role = access.GENERAL_ROLE();
+        vm.prank(malicious);
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
+        );
+        bsx1000x.closeIsolatedFund(5);
+    }
+
+    function test_closeIsolatedFund__revertsIfThisFundIsNotOpened() public {
+        vm.expectRevert(IBSX1000x.IsolatedFundDisabled.selector);
+        bsx1000x.closeIsolatedFund(5);
+    }
+
+    function test_depositIsolatedFund() public {
+        uint32 productId = 5;
+        bool enabled;
+        uint256 fund;
+
+        (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+        assertEq(enabled, false);
+        assertEq(fund, 0);
+
+        bsx1000x.openIsolatedFund(5);
+
+        uint8 tokenDecimals = collateralToken.decimals();
+        uint256 totalAmount = 0;
+
+        for (uint256 i = 1; i < 5; i++) {
+            uint256 rawAmount = i * 2500;
+            collateralToken.mint(address(this), rawAmount);
+            collateralToken.approve(address(bsx1000x), rawAmount);
+
+            uint256 amount = rawAmount.convertTo18D(tokenDecimals);
+            totalAmount += amount;
+            vm.expectEmit(address(bsx1000x));
+            emit IBSX1000x.DepositIsolatedFund(productId, amount, totalAmount);
+            bsx1000x.depositIsolatedFund(productId, amount);
+
+            (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+            assertEq(enabled, true);
+            assertEq(fund, totalAmount);
+            assertEq(collateralToken.balanceOf(address(bsx1000x)), totalAmount.convertFrom18D(tokenDecimals));
+        }
+    }
+
+    function test_depositIsolatedFund_multipleFunds() public {
+        uint8[4] memory productIds = [2, 4, 6, 8];
+        uint8 tokenDecimals = collateralToken.decimals();
+        uint256 totalAmount = 0;
+        bool enabled;
+        uint256 fund;
+
+        for (uint256 i = 0; i < 4; i++) {
+            uint32 productId = productIds[i];
+            bsx1000x.openIsolatedFund(productId);
+
+            uint256 rawAmount = (i + 1) * 1700;
+            collateralToken.mint(address(this), rawAmount);
+            collateralToken.approve(address(bsx1000x), rawAmount);
+
+            uint256 amount = rawAmount.convertTo18D(tokenDecimals);
+            totalAmount += amount;
+            vm.expectEmit(address(bsx1000x));
+            emit IBSX1000x.DepositIsolatedFund(productId, amount, amount);
+            bsx1000x.depositIsolatedFund(productId, amount);
+
+            (enabled, fund) = bsx1000x.getIsolatedFund(productId);
+            assertEq(enabled, true);
+            assertEq(fund, amount);
+        }
+
+        uint256 totalIsolatedFunds = bsx1000x.getTotalIsolatedFunds();
+        assertEq(totalIsolatedFunds, totalAmount);
+        assertEq(collateralToken.balanceOf(address(bsx1000x)), totalAmount.convertFrom18D(tokenDecimals));
+    }
+
+    function test_depositIsolatedFund_revertsIfThisFundIsNotOpened() public {
+        uint32 productId = 5;
+        (bool enabled,) = bsx1000x.getIsolatedFund(productId);
+        assertEq(enabled, false);
+
+        vm.expectRevert(IBSX1000x.IsolatedFundDisabled.selector);
+        bsx1000x.depositIsolatedFund(productId, 1000);
+    }
+
+    function test_depositIsolatedFund_revertsIfZeroAmount() public {
+        uint32 productId = 1;
+        bsx1000x.openIsolatedFund(productId);
+
+        vm.expectRevert(IBSX1000x.ZeroAmount.selector);
+        bsx1000x.depositIsolatedFund(productId, 0);
+
+        uint256 maxZeroScaledAmount = _maxZeroScaledAmount();
+        vm.expectRevert(IBSX1000x.ZeroAmount.selector);
+        bsx1000x.depositIsolatedFund(productId, maxZeroScaledAmount);
     }
 
     function test_getPosition_notExist() public {
@@ -495,7 +658,7 @@ contract BSX1000xTest is Test {
         order.liquidationPrice = 999 * 1e18;
         order.fee = 1e16;
 
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
@@ -503,7 +666,7 @@ contract BSX1000xTest is Test {
         emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
         bsx1000x.openPosition(order, signature);
 
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
@@ -551,7 +714,7 @@ contract BSX1000xTest is Test {
         order.liquidationPrice = 1001 * 1e18;
         order.fee = 1e16;
 
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
@@ -559,7 +722,7 @@ contract BSX1000xTest is Test {
         emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
         bsx1000x.openPosition(order, signature);
 
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
@@ -777,6 +940,45 @@ contract BSX1000xTest is Test {
         bsx1000x.openPosition(order, signature);
     }
 
+    function test_openPosition_revertsIfInsufficientGeneralFund() public {
+        (address account, uint256 accountKey) = makeAddrAndKey("account");
+        (, uint256 signerKey) = makeAddrAndKey("signer");
+        _authorizeSigner(accountKey, signerKey);
+
+        uint256 accountBalance = 100 * 1e18;
+        _deposit(account, accountBalance);
+
+        BSX1000x.Order memory order;
+        order.productId = 1;
+        order.account = account;
+        order.nonce = 5;
+        order.margin = 1 * 1e18;
+        order.leverage = 1000 * 1e18;
+        order.size = -1 * 1e18;
+        order.price = 1000 * 1e18;
+        order.takeProfitPrice = 999 * 1e18;
+        order.liquidationPrice = 1001 * 1e18;
+
+        // fund can not cover fee
+        order.fee = -1e16;
+        bytes memory signature = _signOpenOrder(signerKey, order);
+        vm.expectRevert(IBSX1000x.InsufficientFundBalance.selector);
+        bsx1000x.openPosition(order, signature);
+
+        // fund can not cover max profit
+        order.fee = 1e16;
+        signature = _signOpenOrder(signerKey, order);
+        vm.expectRevert(IBSX1000x.InsufficientFundBalance.selector);
+        bsx1000x.openPosition(order, signature);
+
+        // insufficient isolated fund
+        bsx1000x.openIsolatedFund(order.productId);
+        order.fee = 1e16;
+        signature = _signOpenOrder(signerKey, order);
+        vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InsufficientIsolatedFundBalance.selector, order.productId));
+        bsx1000x.openPosition(order, signature);
+    }
+
     function test_openPosition_revertsIfInsufficientFund() public {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         (, uint256 signerKey) = makeAddrAndKey("signer");
@@ -863,7 +1065,7 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         uint256 credit = 4 * 1e18;
 
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
@@ -871,7 +1073,7 @@ contract BSX1000xTest is Test {
         emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
         bsx1000x.openPosition(order, credit, signature);
 
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
@@ -920,7 +1122,7 @@ contract BSX1000xTest is Test {
         order.fee = 0;
         uint256 credit = 5 * 1e18;
 
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
         bytes memory signature = _signOpenOrder(signerKey, order);
 
@@ -928,7 +1130,7 @@ contract BSX1000xTest is Test {
         emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
         bsx1000x.openPosition(order, credit, signature);
 
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
@@ -1016,8 +1218,8 @@ contract BSX1000xTest is Test {
         bytes memory closeSignature = _signCloseOrder(signerKey, order);
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
 
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
@@ -1029,7 +1231,7 @@ contract BSX1000xTest is Test {
 
         BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1090,7 +1292,7 @@ contract BSX1000xTest is Test {
         bytes memory closeSignature = _signCloseOrder(signerKey, order);
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1103,7 +1305,7 @@ contract BSX1000xTest is Test {
 
         BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1167,7 +1369,7 @@ contract BSX1000xTest is Test {
         bytes memory closeSignature = _signCloseOrder(signerKey, order);
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1180,7 +1382,7 @@ contract BSX1000xTest is Test {
 
         BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1480,7 +1682,7 @@ contract BSX1000xTest is Test {
         bsx1000x.openPosition(order, openSignature);
 
         // withdraw all fund
-        bsx1000x.withdrawFund(bsx1000x.fundBalance());
+        bsx1000x.withdrawFund(bsx1000x.generalFund());
 
         uint128 closePrice = 10_030 * 1e18;
         int256 closePositionFee = -10 * 1e18;
@@ -1526,7 +1728,7 @@ contract BSX1000xTest is Test {
         int256 closePositionFee = 1e18;
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1539,7 +1741,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1598,7 +1800,7 @@ contract BSX1000xTest is Test {
         int256 closePositionFee = 1e18;
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1611,7 +1813,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1670,7 +1872,7 @@ contract BSX1000xTest is Test {
         int256 closePositionFee = 2e18;
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1683,7 +1885,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1742,7 +1944,7 @@ contract BSX1000xTest is Test {
         int256 closePositionFee = 2e18;
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1765,7 +1967,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -1824,7 +2026,7 @@ contract BSX1000xTest is Test {
         int256 closePositionFee = 1e18;
 
         IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
-        uint256 fundBalanceBefore = bsx1000x.fundBalance();
+        uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
         vm.expectEmit();
@@ -1847,7 +2049,7 @@ contract BSX1000xTest is Test {
 
         IBSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
         IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
-        uint256 fundBalanceAfter = bsx1000x.fundBalance();
+        uint256 fundBalanceAfter = bsx1000x.generalFund();
         uint256 lockedFundAfter = bsx1000x.lockedFund();
         uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
 
@@ -2086,6 +2288,133 @@ contract BSX1000xTest is Test {
         );
     }
 
+    function test_closePosition_isolatedProduct() public {
+        (address account, uint256 accountKey) = makeAddrAndKey("account");
+        (, uint256 signerKey) = makeAddrAndKey("signer");
+        _authorizeSigner(accountKey, signerKey);
+
+        uint32 isolatedProductId = 2;
+        bsx1000x.openIsolatedFund(isolatedProductId);
+        _depositIsolatedFund(isolatedProductId, 1_000_000_000 * 1e18);
+
+        uint256 accountBalance = 100 * 1e18;
+        _deposit(account, accountBalance);
+
+        // open position
+        BSX1000x.Order memory order;
+        order.productId = isolatedProductId;
+        order.account = account;
+        order.nonce = 5;
+        order.margin = 10 * 1e18;
+        order.leverage = 1000 * 1e18;
+        order.size = 1 * 1e18;
+        order.price = 10_000 * 1e18;
+        order.takeProfitPrice = 10_025 * 1e18;
+        order.liquidationPrice = 9998 * 1e18;
+        order.fee = 1e16;
+        bytes memory openSignature = _signOpenOrder(signerKey, order);
+        vm.expectEmit();
+        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        bsx1000x.openPosition(order, openSignature);
+
+        // close position
+        uint128 closePrice = 10_015 * 1e18;
+        int256 closePositionFee = 2e16;
+        int256 pnl = 15 * 1e18;
+        bytes memory closeSignature = _signCloseOrder(signerKey, order);
+
+        IBSX1000x.Balance memory accountBalanceBefore = bsx1000x.getBalance(account);
+        uint256 generalFundBefore = bsx1000x.generalFund();
+        (, uint256 isolatedFundBefore) = bsx1000x.getIsolatedFund(isolatedProductId);
+        uint256 lockedIsolatedFundBefore = bsx1000x.lockedFund();
+
+        vm.expectEmit();
+        emit IBSX1000x.ClosePosition(
+            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.Normal
+        );
+        bsx1000x.closePosition(
+            order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
+        );
+
+        BSX1000x.Position memory position = bsx1000x.getPosition(account, order.nonce);
+        IBSX1000x.Balance memory accountBalanceAfter = bsx1000x.getBalance(account);
+        uint256 generalFundAfter = bsx1000x.generalFund();
+        (, uint256 isolatedFundAfter) = bsx1000x.getIsolatedFund(isolatedProductId);
+        uint256 lockedIsolatedFundAfter = bsx1000x.lockedFund();
+        uint256 lockedFund = order.margin * uint256(bsx1000x.MAX_PROFIT_FACTOR());
+
+        assertEq(generalFundAfter, generalFundBefore + uint256(closePositionFee));
+        assertEq(isolatedFundAfter, isolatedFundBefore - uint256(pnl) + lockedFund);
+        assertEq(lockedIsolatedFundAfter, lockedIsolatedFundBefore - lockedFund);
+        assertEq(
+            accountBalanceAfter.available,
+            accountBalanceBefore.available + uint256(pnl) - uint256(closePositionFee) + order.margin
+        );
+        assertEq(accountBalanceAfter.locked, 0);
+        assertEq(
+            generalFundBefore + isolatedFundBefore + accountBalanceBefore.available + accountBalanceBefore.locked
+                + lockedIsolatedFundBefore,
+            generalFundAfter + isolatedFundAfter + accountBalanceAfter.available + lockedIsolatedFundAfter,
+            "e"
+        );
+
+        // check position state
+        assertEq(position.productId, order.productId);
+        assertEq(position.margin, order.margin);
+        assertEq(position.leverage, order.leverage);
+        assertEq(position.size, order.size);
+        assertEq(position.openPrice, order.price);
+        assertEq(position.closePrice, closePrice);
+        assertEq(position.takeProfitPrice, order.takeProfitPrice);
+        assertEq(position.liquidationPrice, order.liquidationPrice);
+        assertEq(uint8(position.status), uint8(IBSX1000x.PositionStatus.Closed));
+    }
+
+    function test_closePosition_isolatedProduct_revertIfInsufficientIsolatedFund() public {
+        (address account, uint256 accountKey) = makeAddrAndKey("account");
+        (, uint256 signerKey) = makeAddrAndKey("signer");
+        _authorizeSigner(accountKey, signerKey);
+
+        uint32 isolatedProductId = 2;
+        bsx1000x.openIsolatedFund(isolatedProductId);
+        _depositIsolatedFund(isolatedProductId, 1_000_000_000 * 1e18);
+
+        uint256 accountBalance = 100 * 1e18;
+        _deposit(account, accountBalance);
+
+        // open position
+        BSX1000x.Order memory order;
+        order.productId = isolatedProductId;
+        order.account = account;
+        order.nonce = 5;
+        order.margin = 10 * 1e18;
+        order.leverage = 1000 * 1e18;
+        order.size = 1 * 1e18;
+        order.price = 10_000 * 1e18;
+        order.takeProfitPrice = 10_030 * 1e18;
+        order.liquidationPrice = 9998 * 1e18;
+        order.fee = 1e16;
+        bytes memory openSignature = _signOpenOrder(signerKey, order);
+        vm.expectEmit();
+        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        bsx1000x.openPosition(order, openSignature);
+
+        // withdraw all fund
+        bsx1000x.closeIsolatedFund(isolatedProductId);
+        bsx1000x.openIsolatedFund(isolatedProductId);
+
+        // close position
+        uint128 closePrice = 10_030 * 1e18;
+        int256 closePositionFee = 2e16;
+        int256 pnl = 30 * 1e18 + 1;
+        bytes memory closeSignature = _signCloseOrder(signerKey, order);
+
+        vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InsufficientIsolatedFundBalance.selector, isolatedProductId));
+        bsx1000x.closePosition(
+            order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
+        );
+    }
+
     function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory signature) {
         (, string memory name, string memory version, uint256 chainId, address verifyingContract,,) =
             bsx1000x.eip712Domain();
@@ -2131,6 +2460,15 @@ contract BSX1000xTest is Test {
         collateralToken.approve(address(bsx1000x), rawAmount);
 
         bsx1000x.depositFund(amount);
+    }
+
+    function _depositIsolatedFund(uint32 productId, uint256 amount) private {
+        uint8 tokenDecimals = collateralToken.decimals();
+        uint256 rawAmount = amount.convertFrom18D(tokenDecimals);
+        collateralToken.mint(address(this), rawAmount);
+        collateralToken.approve(address(bsx1000x), rawAmount);
+
+        bsx1000x.depositIsolatedFund(productId, amount);
     }
 
     function _signOpenOrder(uint256 signerKey, IBSX1000x.Order memory order) private view returns (bytes memory) {

@@ -59,6 +59,7 @@ interface IBSX1000x {
     /*//////////////////////////////////////////////////////////////////////////
                                     ERRORS
     //////////////////////////////////////////////////////////////////////////*/
+
     /// @notice Thrown when the amount is zero
     error ZeroAmount();
 
@@ -121,6 +122,12 @@ interface IBSX1000x {
 
     /// @notice Thrown when the fund balance is insufficient
     error InsufficientFundBalance();
+
+    /// @notice Thrown when the isolated fund balance is insufficient
+    error InsufficientIsolatedFundBalance(uint256 productId);
+
+    /// @notice Thrown when the isolated fund is disabled
+    error IsolatedFundDisabled();
 
     /// @notice Thrown when the signer of an order is not authorized
     /// @param account The account address
@@ -189,6 +196,12 @@ interface IBSX1000x {
     /// @param fundBalance The fund balance after the withdrawal (in 18 decimals)
     event WithdrawFund(uint256 amount, uint256 fundBalance);
 
+    event OpenIsolatedFund(uint256 productId);
+
+    event CloseIsolatedFund(uint256 productId);
+
+    event DepositIsolatedFund(uint256 productId, uint256 amount, uint256 balance);
+
     /*//////////////////////////////////////////////////////////////////////////
                                     FUNCTIONS
     //////////////////////////////////////////////////////////////////////////*/
@@ -230,6 +243,15 @@ interface IBSX1000x {
     /// @param nonce The nonce of the withdrawal
     /// @param signature The signature of the withdrawal
     function withdraw(address account, uint256 amount, uint256 fee, uint256 nonce, bytes memory signature) external;
+
+    /// @notice Open isolated fund for a product
+    function openIsolatedFund(uint32 productId) external;
+
+    /// @notice Close and move the isolated fund to the general fund
+    function closeIsolatedFund(uint32 productId) external;
+
+    /// @notice Deposit to the isolated fund
+    function depositIsolatedFund(uint32 productId, uint256 amount) external;
 
     /// @notice Deposit fund to the exchange
     /// @param amount The amount to deposit (in 18 decimals)
@@ -295,8 +317,20 @@ interface IBSX1000x {
     /// @notice Returns the collateral token
     function collateralToken() external view returns (IERC20Extend);
 
-    /// @notice Returns the fund balance used to pay profits for winning trades
-    function fundBalance() external view returns (uint256);
+    /// @notice Returns the general fund balance used to pay profits for winning trades
+    function generalFund() external view returns (uint256);
+
+    /// @notice Returns the isolated fund balance used to pay profits for winning trades in isolated products
+    /// @param productId The product ID
+    /// @return enable Whether the isolated fund is enabled
+    /// @return fund The isolated fund balance
+    function getIsolatedFund(uint32 productId) external view returns (bool enable, uint256 fund);
+
+    /// @notice Returns total amount of all isolated funds
+    function getTotalIsolatedFunds() external view returns (uint256);
+
+    /// @notice Returns all isolated product IDs
+    function getIsolatedProducts() external view returns (uint256[] memory);
 
     /// @notice Returns the balance of an account
     function getBalance(address account) external view returns (Balance memory);
