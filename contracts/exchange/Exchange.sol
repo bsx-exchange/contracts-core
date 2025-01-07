@@ -4,25 +4,24 @@ pragma solidity ^0.8.23;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import {IBSX1000x} from "../1000x/interfaces/IBSX1000x.sol";
 import {ExchangeStorage} from "./ExchangeStorage.sol";
 import {IExchange, ILiquidation, ISwap} from "./interfaces/IExchange.sol";
 import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
-import {IERC20Extend} from "./interfaces/external/IERC20Extend.sol";
-import {IERC3009Minimal} from "./interfaces/external/IERC3009Minimal.sol";
-import {IUniversalSigValidator} from "./interfaces/external/IUniversalSigValidator.sol";
-import {IWETH9} from "./interfaces/external/IWETH9.sol";
 import {Errors} from "./lib/Errors.sol";
 import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
+import {BalanceLogic} from "./lib/logic/BalanceLogic.sol";
 import {LiquidationLogic} from "./lib/logic/LiquidationLogic.sol";
 import {SwapLogic} from "./lib/logic/SwapLogic.sol";
-import {MAX_REBATE_RATE, NATIVE_ETH, WETH9} from "./share/Constants.sol";
+import {MAX_REBATE_RATE, NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
 import {OrderSide} from "./share/Enums.sol";
 
 /// @title Exchange contract
@@ -31,7 +30,7 @@ import {OrderSide} from "./share/Enums.sol";
 contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchange {
     using EnumerableSet for EnumerableSet.AddressSet;
     using LibOrder for LibOrder.Order;
-    using SafeERC20 for IERC20Extend;
+    using SafeERC20 for IERC20;
     using Percentage for uint128;
     using MathHelper for uint128;
     using MathHelper for uint256;
@@ -45,10 +44,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     );
     bytes32 public constant WITHDRAW_TYPEHASH =
         keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
+    bytes32 public constant TRANSFER_TO_BSX1000_TYPEHASH =
+        keccak256("TransferToBSX1000(address account,address token,uint256 amount,uint256 nonce)");
     bytes32 public constant ORDER_TYPEHASH =
         keccak256("Order(address sender,uint128 size,uint128 price,uint64 nonce,uint8 productIndex,uint8 orderSide)");
-    IUniversalSigValidator public constant UNIVERSAL_SIG_VALIDATOR =
-        IUniversalSigValidator(0x3F72193B6687707bfaA5119a3910eb4e27108bE8);
 
     function _checkRole(bytes32 role, address account) internal view {
         if (!access.hasRole(role, account)) {
@@ -75,7 +74,16 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         _;
     }
 
-    ///@inheritdoc IExchange
+    modifier enabledDeposit() {
+        if (!canDeposit) {
+            revert Errors.Exchange_DisabledDeposit();
+        }
+        _;
+    }
+
+    receive() external payable {}
+
+    /// @inheritdoc IExchange
     function addSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
         bool success = supportedTokens.add(token);
         if (!success) {
@@ -84,7 +92,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         emit SupportedTokenAdded(token);
     }
 
-    ///@inheritdoc IExchange
+    /// @inheritdoc IExchange
     function removeSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
         bool success = supportedTokens.remove(token);
         if (!success) {
@@ -93,38 +101,28 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         emit SupportedTokenRemoved(token);
     }
 
-    ///@inheritdoc IExchange
-    function deposit(address token, uint128 amount) external payable {
-        deposit(msg.sender, token, amount);
-    }
-
-    ///@inheritdoc IExchange
-    function deposit(address recipient, address token, uint128 amount) public payable supportedToken(token) {
-        if (!canDeposit) revert Errors.Exchange_DisabledDeposit();
-        if (amount == 0) revert Errors.Exchange_ZeroAmount();
-
-        if (token == NATIVE_ETH) {
-            token = WETH9;
-            if (msg.value != amount) revert Errors.Exchange_InvalidEthAmount();
-            IWETH9(token).deposit{value: amount}();
-        } else {
-            (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
-            if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
-            amount = roundDownAmount.safeUInt128();
-            IERC20Extend(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
-        }
-
-        clearingService.deposit(recipient, amount, token, spotEngine);
-        emit Deposit(token, recipient, amount, 0);
-    }
-
-    ///@inheritdoc IExchange
+    /// @inheritdoc IExchange
     function depositRaw(address recipient, address token, uint128 rawAmount) external payable supportedToken(token) {
         uint256 amount = token == NATIVE_ETH ? rawAmount : rawAmount.convertToScale(token);
         deposit(recipient, token, amount.safeUInt128());
     }
 
-    //// @inheritdoc IExchange
+    /// @inheritdoc IExchange
+    function deposit(address token, uint128 amount) external payable {
+        deposit(msg.sender, token, amount);
+    }
+
+    /// @inheritdoc IExchange
+    function deposit(address recipient, address token, uint128 amount)
+        public
+        payable
+        enabledDeposit
+        supportedToken(token)
+    {
+        BalanceLogic.deposit(BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount);
+    }
+
+    /// @inheritdoc IExchange
     function depositWithAuthorization(
         address token,
         address depositor,
@@ -133,19 +131,17 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external supportedToken(token) {
-        if (!canDeposit) {
-            revert Errors.Exchange_DisabledDeposit();
-        }
-
-        (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
-        if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
-
-        IERC3009Minimal(token).receiveWithAuthorization(
-            depositor, address(this), amountToTransfer, validAfter, validBefore, nonce, signature
+    ) external enabledDeposit supportedToken(token) {
+        BalanceLogic.depositWithAuthorization(
+            BalanceLogic.BalanceEngine(clearingService, spotEngine),
+            depositor,
+            token,
+            amount,
+            validAfter,
+            validBefore,
+            nonce,
+            signature
         );
-        clearingService.deposit(depositor, roundDownAmount, token, spotEngine);
-        emit Deposit(token, depositor, roundDownAmount, 0);
     }
 
     /// @inheritdoc IExchange
@@ -154,7 +150,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
-        IERC20Extend(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
         clearingService.depositInsuranceFund(roundDownAmount);
 
         uint256 insuranceFundBalance = clearingService.getInsuranceFundBalance();
@@ -167,7 +163,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 amountToTransfer = amount.convertFromScale(token);
         if (amount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
-        IERC20Extend(token).safeTransfer(msg.sender, amountToTransfer);
+        IERC20(token).safeTransfer(msg.sender, amountToTransfer);
         clearingService.withdrawInsuranceFundEmergency(amount);
 
         uint256 insuranceFundBalance = clearingService.getInsuranceFundBalance();
@@ -179,7 +175,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         address token = book.getCollateralToken();
         uint256 totalFee = book.claimTradingFees().safeUInt256();
         uint256 amountToTransfer = totalFee.convertFromScale(token);
-        IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
+        IERC20(token).safeTransfer(feeRecipientAddress, amountToTransfer);
         emit ClaimTradingFees(msg.sender, totalFee);
     }
 
@@ -200,12 +196,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             _collectedFee[token] = 0;
 
             uint256 amountToTransfer = totalFee.convertFromScale(token);
-            IERC20Extend(token).safeTransfer(feeRecipientAddress, amountToTransfer);
+            IERC20(token).safeTransfer(feeRecipientAddress, amountToTransfer);
             emit ClaimSequencerFees(msg.sender, token, totalFee);
         }
     }
 
-    ///@inheritdoc IExchange
+    /// @inheritdoc IExchange
     function processBatch(bytes[] calldata operations) external onlyRole(access.BATCH_OPERATOR_ROLE()) {
         if (pauseBatchProcess) {
             revert Errors.Exchange_PausedProcessBatch();
@@ -282,7 +278,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         );
     }
 
-    ///@inheritdoc IExchange
+    /// @inheritdoc IExchange
     function updateFeeRecipientAddress(address _feeRecipientAddress) external onlyRole(access.GENERAL_ROLE()) {
         if (_feeRecipientAddress == address(0)) {
             revert Errors.ZeroAddress();
@@ -502,44 +498,79 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         } else if (operationType == OperationType.AddSigningWallet) {
             AddSigningWallet memory txs = abi.decode(data[5:], (AddSigningWallet));
             _addSigningWallet(txs.sender, txs.signer, txs.message, txs.nonce, txs.walletSignature, txs.signerSignature);
+        } else if (operationType == OperationType.TransferToBSX1000) {
+            TransferToBSX1000Params memory transferData = abi.decode(data[5:], (TransferToBSX1000Params));
+            _transferToBSX1000(transferData);
         } else if (operationType == OperationType.Withdraw) {
-            Withdraw memory txs = abi.decode(data[5:], (Withdraw));
-            if (!canWithdraw) {
-                revert Errors.Exchange_DisabledWithdraw();
-            }
-
-            uint128 maxWithdrawalFee = _getMaxWithdrawalFee(txs.token);
-            if (txs.withdrawalSequencerFee > maxWithdrawalFee) {
-                revert Errors.Exchange_ExceededMaxWithdrawFee(txs.withdrawalSequencerFee, maxWithdrawalFee);
-            }
-            if (isWithdrawNonceUsed[txs.sender][txs.nonce]) {
-                revert Errors.Exchange_Withdraw_NonceUsed(txs.sender, txs.nonce);
-            }
-            isWithdrawNonceUsed[txs.sender][txs.nonce] = true;
-
-            bytes32 digest =
-                _hashTypedDataV4(keccak256(abi.encode(WITHDRAW_TYPEHASH, txs.sender, txs.token, txs.amount, txs.nonce)));
-            if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(txs.sender, digest, txs.signature)) {
-                emit WithdrawFailed(txs.sender, txs.nonce, 0, 0);
-                return;
-            }
-
-            int256 currentBalance = balanceOf(txs.sender, txs.token);
-            if (currentBalance.safeInt128() < txs.amount.safeInt128()) {
-                emit WithdrawFailed(txs.sender, txs.nonce, txs.amount, currentBalance);
-                return;
-            } else {
-                clearingService.withdraw(txs.sender, txs.amount, txs.token, spotEngine);
-                IERC20Extend product = IERC20Extend(txs.token);
-                uint256 netAmount = txs.amount - txs.withdrawalSequencerFee;
-                uint256 amountToTransfer = netAmount.convertFromScale(txs.token);
-                _collectedFee[txs.token] += txs.withdrawalSequencerFee;
-                product.safeTransfer(txs.sender, amountToTransfer);
-                emit WithdrawSucceeded(txs.token, txs.sender, txs.nonce, txs.amount, 0, txs.withdrawalSequencerFee);
-            }
+            Withdraw memory withdrawData = abi.decode(data[5:], (Withdraw));
+            _withdraw(withdrawData);
         } else {
             revert Errors.Exchange_InvalidOperationType();
         }
+    }
+
+    /// @dev Handles a withdraw
+    function _withdraw(Withdraw memory data) internal {
+        if (!canWithdraw) {
+            revert Errors.Exchange_DisabledWithdraw();
+        }
+        if (isWithdrawNonceUsed[data.sender][data.nonce]) {
+            revert Errors.Exchange_Withdraw_NonceUsed(data.sender, data.nonce);
+        }
+        isWithdrawNonceUsed[data.sender][data.nonce] = true;
+
+        bytes32 digest =
+            _hashTypedDataV4(keccak256(abi.encode(WITHDRAW_TYPEHASH, data.sender, data.token, data.amount, data.nonce)));
+
+        // only EOA can withdraw ETH
+        bool isValidSignature = data.token == NATIVE_ETH
+            ? ECDSA.recover(digest, data.signature) == data.sender
+            : UNIVERSAL_SIG_VALIDATOR.isValidSig(data.sender, digest, data.signature);
+
+        if (!isValidSignature) {
+            emit WithdrawFailed(data.sender, data.nonce, 0, 0);
+            return;
+        }
+
+        BalanceLogic.withdraw(_collectedFee, BalanceLogic.BalanceEngine(clearingService, spotEngine), data);
+    }
+
+    function _transferToBSX1000(TransferToBSX1000Params memory data) internal {
+        if (isTransferToBSX1000NonceUsed[data.account][data.nonce]) {
+            revert Errors.Exchange_TransferToBSX1000_NonceUsed(data.account, data.nonce);
+        }
+        isTransferToBSX1000NonceUsed[data.account][data.nonce] = true;
+
+        try this.innerTransferToBSX1000(data) returns (uint256 balance) {
+            emit TransferToBSX1000(
+                data.token, data.account, data.nonce, data.amount, balance, TransferToBSX1000Status.Success
+            );
+        } catch {
+            emit TransferToBSX1000(
+                data.token, data.account, data.nonce, data.amount, 0, TransferToBSX1000Status.Failure
+            );
+        }
+    }
+
+    function innerTransferToBSX1000(TransferToBSX1000Params memory data)
+        external
+        internalCall
+        returns (uint256 balance)
+    {
+        bytes32 digest = _hashTypedDataV4(
+            keccak256(abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, data.account, data.token, data.amount, data.nonce))
+        );
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(data.account, digest, data.signature)) {
+            revert Errors.Exchange_InvalidSignature(data.account);
+        }
+
+        return BalanceLogic.transferToBSX1000(
+            BalanceLogic.BalanceEngine(clearingService, spotEngine),
+            IBSX1000x(access.getBsx1000()),
+            data.account,
+            data.token,
+            data.amount
+        );
     }
 
     /// @dev Parse encoded data to order
@@ -589,14 +620,6 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
                 )
             )
         );
-    }
-
-    function _getMaxWithdrawalFee(address token) internal pure returns (uint128) {
-        if (token == WETH9) {
-            return 0.001 ether;
-        } else {
-            return 1e18;
-        }
     }
 
     /// @dev Validates and authorizes a signer to sign on behalf of a sender.

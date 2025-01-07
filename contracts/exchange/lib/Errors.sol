@@ -106,6 +106,15 @@ library Errors {
     /// @notice Thrown when withdrawing with used nonce
     error Exchange_Withdraw_NonceUsed(address account, uint64 nonce);
 
+    /// @notice Thrown when transferring to BSX1000 with used nonce
+    error Exchange_TransferToBSX1000_NonceUsed(address account, uint256 nonce);
+
+    /// @notice Thrown when transferring to BSX1000 with invalid token
+    error Exchange_TransferToBSX1000_InvalidToken(address transferredToken, address expectedToken);
+
+    /// @notice Thrown when transferring to BSX1000 with insufficient balance
+    error Exchange_TransferToBSX1000_InsufficientBalance(address account, int256 balance, uint256 transferAmount);
+
     /// @notice Thrown when account balance in not positive
     error Exchange_Liquidation_InvalidBalance(address account, address token, int256 balance);
 

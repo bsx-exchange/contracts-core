@@ -49,6 +49,22 @@ interface IExchange is ILiquidation, ISwap {
     /// @param balance Balance of account after withdraw (in 18 decimals)
     event WithdrawFailed(address indexed user, uint64 indexed nonce, uint128 amount, int256 balance);
 
+    /// @dev Emitted when a user transfer collateral to BSX1000
+    /// @param token Token address
+    /// @param user Account address
+    /// @param nonce Nonce of the transfer
+    /// @param amount Transfer amount (in 18 decimals)
+    /// @param balance Balance of account after transfer (in 18 decimals)
+    /// @param status Transfer status
+    event TransferToBSX1000(
+        address indexed token,
+        address indexed user,
+        uint256 nonce,
+        uint256 amount,
+        uint256 balance,
+        TransferToBSX1000Status status
+    );
+
     /// @dev Emitted when referral rebate is paid
     /// @param referrer Referrer address
     /// @param amount Rebate amount
@@ -94,6 +110,11 @@ interface IExchange is ILiquidation, ISwap {
     /// @notice deprecated, use `WithdrawFailed` instead
     event WithdrawRejected(address sender, uint64 nonce, uint128 withdrawAmount, int256 spotBalance);
 
+    enum TransferToBSX1000Status {
+        Success,
+        Failure
+    }
+
     /// @notice All operation types in the exchange
     enum OperationType {
         MatchLiquidationOrders,
@@ -111,7 +132,7 @@ interface IExchange is ILiquidation, ISwap {
         AddSigningWallet,
         _ClaimSequencerFees, // deprecated
         Withdraw,
-        Invalid
+        TransferToBSX1000
     }
 
     /// @notice Authorizes a wallet to sign on behalf of the sender
@@ -122,6 +143,15 @@ interface IExchange is ILiquidation, ISwap {
         uint64 nonce;
         bytes walletSignature;
         bytes signerSignature;
+    }
+
+    /// @notice Struct for transferring collateral to BSX1000
+    struct TransferToBSX1000Params {
+        address account;
+        address token;
+        uint256 amount;
+        uint256 nonce;
+        bytes signature;
     }
 
     /// @notice Withdraws tokens from the exchange

@@ -29,7 +29,8 @@ abstract contract ExchangeStorage {
     mapping(address account => mapping(uint256 liquidationNonce => bool liquidated)) public isLiquidationNonceUsed;
 
     IUniversalRouter public universalRouter;
-    uint256 private _lastResetBlockNumber; // deprecated
+
+    mapping(address account => mapping(uint256 transferNonce => bool used)) public isTransferToBSX1000NonceUsed;
     int256 internal _sequencerFee;
     EnumerableSet.AddressSet private _userWallets; // deprecated
     uint256 public lastFundingRateUpdate;
