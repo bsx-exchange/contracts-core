@@ -72,6 +72,13 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         _;
     }
 
+    modifier notVault(address account) {
+        if (access.getVaultManager().isRegistered(account)) {
+            revert Errors.Exchange_Vault_Registered();
+        }
+        _;
+    }
+
     receive() external payable {}
 
     /// @inheritdoc IExchange
@@ -93,7 +100,15 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function depositRaw(address recipient, address token, uint128 rawAmount) external payable supportedToken(token) {
+    function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes calldata signature)
+        external
+        onlyRole(access.GENERAL_ROLE())
+    {
+        access.getVaultManager().registerVault(vault, feeRecipient, profitShareBps, signature);
+    }
+
+    /// @inheritdoc IExchange
+    function depositRaw(address recipient, address token, uint128 rawAmount) external payable {
         uint256 amount = token == NATIVE_ETH ? rawAmount : rawAmount.convertToScale(token);
         deposit(recipient, token, amount.safeUInt128());
     }
@@ -109,6 +124,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         payable
         enabledDeposit
         supportedToken(token)
+        notVault(recipient)
     {
         BalanceLogic.deposit(BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount);
     }
@@ -122,7 +138,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external enabledDeposit supportedToken(token) {
+    ) external enabledDeposit supportedToken(token) notVault(depositor) {
         BalanceLogic.depositWithAuthorization(
             BalanceLogic.BalanceEngine(clearingService, spotEngine),
             depositor,
@@ -237,7 +253,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc ISwap
-    function innerSwapWithPermit(SwapParams calldata params) external internalCall returns (uint256 amountOutX18) {
+    function innerSwapWithPermit(SwapParams calldata params)
+        external
+        internalCall
+        notVault(params.account)
+        returns (uint256 amountOutX18)
+    {
         return SwapLogic.executeSwap(
             isSwapNonceUsed,
             _collectedFee,
@@ -344,6 +365,11 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         return supportedTokens.contains(token);
     }
 
+    /// @inheritdoc IExchange
+    function isVault(address account) public view returns (bool) {
+        return access.getVaultManager().isRegistered(account);
+    }
+
     /// @dev Handles a operation. Will revert if operation type is invalid.
     /// @param data Transaction data to handle
     /// The first byte is operation type
@@ -402,13 +428,13 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @dev Handles a withdraw
-    function _withdraw(Withdraw memory data) internal enabledWithdraw {
+    function _withdraw(Withdraw memory data) internal enabledWithdraw notVault(data.sender) {
         BalanceLogic.withdraw(
             isWithdrawNonceUsed, _collectedFee, this, BalanceLogic.BalanceEngine(clearingService, spotEngine), data
         );
     }
 
-    function _transferToBSX1000(TransferToBSX1000Params memory data) internal {
+    function _transferToBSX1000(TransferToBSX1000Params memory data) internal notVault(data.account) {
         if (isTransferToBSX1000NonceUsed[data.account][data.nonce]) {
             revert Errors.Exchange_TransferToBSX1000_NonceUsed(data.account, data.nonce);
         }

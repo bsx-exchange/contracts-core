@@ -16,6 +16,7 @@ import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
+import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
@@ -75,6 +76,10 @@ contract BSX1000xTest is Test {
 
         exchange.setCanDeposit(true);
         exchange.addSupportedToken(address(collateralToken));
+
+        VaultManager vaultManager = new VaultManager();
+        stdstore.target(address(vaultManager)).sig("access()").checked_write(address(access));
+        access.setVaultManager(address(vaultManager));
 
         bsx1000x.setLockFactor(LOCK_FACTOR);
     }

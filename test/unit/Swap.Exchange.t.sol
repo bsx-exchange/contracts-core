@@ -13,6 +13,7 @@ import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange} from "contracts/exchange/Exchange.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
+import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {ISwap} from "contracts/exchange/interfaces/ISwap.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
@@ -81,6 +82,10 @@ contract SwapExchangeTest is Test {
         stdstore.target(address(exchange)).sig("book()").checked_write(address(orderbook));
         stdstore.target(address(exchange)).sig("spotEngine()").checked_write(address(spotEngine));
         stdstore.target(address(exchange)).sig("universalRouter()").checked_write(address(universalRouter));
+
+        VaultManager vaultManager = new VaultManager();
+        stdstore.target(address(vaultManager)).sig("access()").checked_write(address(access));
+        access.setVaultManager(address(vaultManager));
 
         exchange.setCanDeposit(true);
         exchange.addSupportedToken(address(tokenIn));

@@ -15,6 +15,7 @@ import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
@@ -113,6 +114,10 @@ contract ExchangeTest is Test {
         access.setClearingService(address(clearingService));
         access.setOrderBook(address(orderbook));
         access.setSpotEngine(address(spotEngine));
+
+        VaultManager vaultManager = new VaultManager();
+        stdstore.target(address(vaultManager)).sig("access()").checked_write(address(access));
+        access.setVaultManager(address(vaultManager));
 
         stdstore.target(address(exchange)).sig("access()").checked_write(address(access));
         stdstore.target(address(exchange)).sig("book()").checked_write(address(orderbook));

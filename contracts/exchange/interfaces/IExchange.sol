@@ -174,6 +174,14 @@ interface IExchange is ILiquidation, ISwap {
     /// @param token Token address
     function removeSupportedToken(address token) external;
 
+    /// @notice Registers account as a vault
+    /// @param vault Vault address
+    /// @param feeRecipient Fee recipient address
+    /// @param profitShareBps Profit share basis points (1 = 0.01%)
+    /// @param signature Signature bytes signed by an EOA wallet or a contract wallet
+    function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes calldata signature)
+        external;
+
     /// @notice Deposits token with scaled amount to the exchange
     /// @dev Emits a {Deposit} event
     /// @param token Token address
@@ -279,4 +287,7 @@ interface IExchange is ILiquidation, ISwap {
     /// @dev Checks whether the token is supported or not
     /// @param token Token address
     function isSupportedToken(address token) external view returns (bool);
+
+    /// @dev Checks whether the account is a vault or not
+    function isVault(address account) external view returns (bool);
 }

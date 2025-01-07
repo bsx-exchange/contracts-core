@@ -14,6 +14,9 @@ library Errors {
     /// @notice Thrown when `msg.sender` is not authorized
     error Unauthorized();
 
+    /// @notice Thrown when signature is invalid
+    error InvalidSignature(address account);
+
     /*//////////////////////////////////////////////////////////////////////////
                                       EXCHANGE
     //////////////////////////////////////////////////////////////////////////*/
@@ -161,6 +164,9 @@ library Errors {
     /// @notice Thrown when swap amount exceeds the maximum amount
     error Exchange_Swap_AmountOutTooLittle(uint256 amountOutX18, uint256 minAmountOutX18);
 
+    /// @notice Thrown when interacting with vault address
+    error Exchange_Vault_Registered();
+
     /*//////////////////////////////////////////////////////////////////////////
                                     CLEARING SERVICE
     //////////////////////////////////////////////////////////////////////////*/
@@ -200,4 +206,23 @@ library Errors {
 
     /// @notice Thrown when order price is invalid
     error Orderbook_InvalidOrderPrice();
+
+    /*//////////////////////////////////////////////////////////////////////////
+                                    VAULT MANAGER
+    //////////////////////////////////////////////////////////////////////////*/
+
+    /// @notice Thrown when vault is already registered
+    error Vault_AlreadyRegistered(address vault);
+
+    /// @notice Thrown when vault address is invalid
+    error Vault_InvalidVaultAddress(address vault);
+
+    /// @notice Thrown when fee recipient is invalid
+    error Vault_InvalidFeeRecipient(address vault, address feeRecipient);
+
+    /// @notice Thrown when profit share basis points is invalid
+    error Vault_InvalidProfitShareBps(address vault, uint256 profitShareBps);
+
+    /// @notice Thrown when registering vault with not zero balance
+    error Vault_NotZeroBalance(address vault, address token, int256 balance);
 }

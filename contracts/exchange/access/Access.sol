@@ -11,6 +11,7 @@ import {IExchange} from "../interfaces/IExchange.sol";
 import {IOrderBook} from "../interfaces/IOrderBook.sol";
 import {IPerp} from "../interfaces/IPerp.sol";
 import {ISpot} from "../interfaces/ISpot.sol";
+import {IVaultManager} from "../interfaces/IVaultManager.sol";
 import {Errors} from "../lib/Errors.sol";
 
 /// @title Access contract
@@ -34,6 +35,8 @@ contract Access is Initializable, AccessControlUpgradeable {
     IBSX1000x private bsx1000;
 
     mapping(bytes32 role => EnumerableSet.AddressSet accounts) private roles;
+
+    IVaultManager private vaultManager;
 
     // function initialize(address adminGeneral) public initializer {
     //     if (adminGeneral == address(0)) {
@@ -104,6 +107,13 @@ contract Access is Initializable, AccessControlUpgradeable {
         bsx1000 = IBSX1000x(_bsx1000);
     }
 
+    function setVaultManager(address _vaultManager) external onlyRole(ADMIN_ROLE) {
+        if (_vaultManager == address(0)) {
+            revert Errors.ZeroAddress();
+        }
+        vaultManager = IVaultManager(_vaultManager);
+    }
+
     function getExchange() external view returns (IExchange) {
         return exchange;
     }
@@ -126,6 +136,10 @@ contract Access is Initializable, AccessControlUpgradeable {
 
     function getBsx1000() external view returns (IBSX1000x) {
         return bsx1000;
+    }
+
+    function getVaultManager() external view returns (IVaultManager) {
+        return vaultManager;
     }
 
     function getAccountsForRole(bytes32 role) external view returns (address[] memory accounts) {

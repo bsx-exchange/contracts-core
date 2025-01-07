@@ -11,6 +11,7 @@ import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange} from "contracts/exchange/Exchange.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {ILiquidation} from "contracts/exchange/interfaces/ILiquidation.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
@@ -67,6 +68,10 @@ contract LiquidationExchangeTest is Test {
         stdstore.target(address(exchange)).sig("spotEngine()").checked_write(address(spotEngine));
         stdstore.target(address(exchange)).sig("universalRouter()").checked_write(address(mockUniversalRouter));
         exchange.setCanDeposit(true);
+
+        VaultManager vaultManager = new VaultManager();
+        stdstore.target(address(vaultManager)).sig("access()").checked_write(address(access));
+        access.setVaultManager(address(vaultManager));
 
         vm.stopPrank();
     }

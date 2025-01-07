@@ -205,6 +205,28 @@ contract AccessTest is Test {
         access.setBsx1000(makeAddr("bsx1000"));
     }
 
+    function test_setVaultManager() public {
+        vm.startPrank(admin);
+
+        address vaultManager = makeAddr("vaultManager");
+        access.setVaultManager(vaultManager);
+        assertEq(vaultManager, address(access.getVaultManager()));
+    }
+
+    function test_setVaultManager_revertsIfSetZeroAddr() public {
+        vm.startPrank(admin);
+
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        access.setVaultManager(address(0));
+    }
+
+    function test_setVaultManager_revertsIfNotAdmin() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+        );
+        access.setVaultManager(makeAddr("vaultManager"));
+    }
+
     function test_getAccountsForRole() public {
         vm.startPrank(admin);
 

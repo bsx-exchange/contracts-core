@@ -16,6 +16,7 @@ import {BSX1000x, IBSX1000x} from "contracts/1000x/BSX1000x.sol";
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
@@ -86,6 +87,10 @@ contract BalanceExchangeTest is Test {
         exchange.setCanWithdraw(true);
 
         exchange.addSupportedToken(address(collateralToken));
+
+        VaultManager vaultManager = new VaultManager();
+        stdstore.target(address(vaultManager)).sig("access()").checked_write(address(access));
+        access.setVaultManager(address(vaultManager));
 
         vm.stopPrank();
     }
@@ -356,7 +361,7 @@ contract BalanceExchangeTest is Test {
 
     function test_depositRaw_revertsIfTokenNotSupported() public {
         address account = makeAddr("account");
-        address notSupportedToken = makeAddr("notSupportedToken");
+        address notSupportedToken = address(new ERC20Simple(6));
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_TokenNotSupported.selector, notSupportedToken));
         exchange.depositRaw(account, notSupportedToken, 100);
     }
