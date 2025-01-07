@@ -17,11 +17,10 @@ import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
-import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
+import {OrderLogic} from "contracts/exchange/lib/logic/OrderLogic.sol";
 import {MAX_REBATE_RATE, NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
-import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
 contract ExchangeTest is Test {
@@ -55,6 +54,8 @@ contract ExchangeTest is Test {
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant ORDER_TYPEHASH =
+        keccak256("Order(address sender,uint128 size,uint128 price,uint64 nonce,uint8 productIndex,uint8 orderSide)");
 
     struct WrappedOrder {
         uint8 productId;
@@ -63,9 +64,9 @@ contract ExchangeTest is Test {
         bool isLiquidated;
         IOrderBook.Fee fee;
         uint64 makerNonce;
-        OrderSide makerSide;
+        OrderLogic.OrderSide makerSide;
         uint64 takerNonce;
-        OrderSide takerSide;
+        OrderLogic.OrderSide takerSide;
         uint128 sequencerFee;
     }
 
@@ -386,8 +387,8 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 2;
         generalOrder.takerNonce = 3;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.fee = IOrderBook.Fee({maker: 2 * 1e12, taker: 3 * 1e12, referralRebate: 0, liquidationPenalty: 0});
 
         bytes memory operation;
@@ -397,7 +398,7 @@ contract ExchangeTest is Test {
         {
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -410,7 +411,7 @@ contract ExchangeTest is Test {
             );
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -455,13 +456,13 @@ contract ExchangeTest is Test {
             bool makerIsLiquidated = isLiquidated[i];
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: 0,
                     price: 0,
                     nonce: 50,
                     productIndex: productId,
-                    orderSide: OrderSide.BUY
+                    orderSide: OrderLogic.OrderSide.BUY
                 }),
                 makerIsLiquidated,
                 0
@@ -470,13 +471,13 @@ contract ExchangeTest is Test {
             bool takerIsLiquidated = !makerIsLiquidated;
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: 0,
                     price: 0,
                     nonce: 60,
                     productIndex: productId,
-                    orderSide: OrderSide.SELL
+                    orderSide: OrderLogic.OrderSide.SELL
                 }),
                 takerIsLiquidated,
                 0
@@ -502,13 +503,13 @@ contract ExchangeTest is Test {
         uint8 makerProductId = 1;
         bytes memory makerEncodedOrder = _encodeOrder(
             makerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: 0,
                 price: 0,
                 nonce: 66,
                 productIndex: makerProductId,
-                orderSide: OrderSide.BUY
+                orderSide: OrderLogic.OrderSide.BUY
             }),
             isLiquidated,
             0
@@ -517,13 +518,13 @@ contract ExchangeTest is Test {
         uint8 takerProductId = 2;
         bytes memory takerEncodedOrder = _encodeOrder(
             takerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: 0,
                 price: 0,
                 nonce: 77,
                 productIndex: takerProductId,
-                orderSide: OrderSide.SELL
+                orderSide: OrderLogic.OrderSide.SELL
             }),
             isLiquidated,
             0
@@ -550,26 +551,26 @@ contract ExchangeTest is Test {
         for (uint256 i = 0; i < 2; i++) {
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: 10,
                     price: 20,
                     nonce: 66,
                     productIndex: productId,
-                    orderSide: OrderSide.BUY
+                    orderSide: OrderLogic.OrderSide.BUY
                 }),
                 isLiquidated,
                 0
             );
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: 10,
                     price: 20,
                     nonce: 77,
                     productIndex: productId,
-                    orderSide: OrderSide.SELL
+                    orderSide: OrderLogic.OrderSide.SELL
                 }),
                 isLiquidated,
                 0
@@ -579,13 +580,13 @@ contract ExchangeTest is Test {
             if (account == maker) {
                 makerEncodedOrder = _encodeOrder(
                     maliciousSignerKey,
-                    LibOrder.Order({
+                    OrderLogic.Order({
                         sender: maker,
                         size: 0,
                         price: 0,
                         nonce: 66,
                         productIndex: productId,
-                        orderSide: OrderSide.BUY
+                        orderSide: OrderLogic.OrderSide.BUY
                     }),
                     isLiquidated,
                     0
@@ -593,13 +594,13 @@ contract ExchangeTest is Test {
             } else {
                 takerEncodedOrder = _encodeOrder(
                     maliciousSignerKey,
-                    LibOrder.Order({
+                    OrderLogic.Order({
                         sender: taker,
                         size: 0,
                         price: 0,
                         nonce: 77,
                         productIndex: productId,
-                        orderSide: OrderSide.SELL
+                        orderSide: OrderLogic.OrderSide.SELL
                     }),
                     isLiquidated,
                     0
@@ -631,26 +632,26 @@ contract ExchangeTest is Test {
         for (uint256 i = 0; i < 2; i++) {
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: 10,
                     price: 20,
                     nonce: 77,
                     productIndex: productId,
-                    orderSide: OrderSide.BUY
+                    orderSide: OrderLogic.OrderSide.BUY
                 }),
                 isLiquidated,
                 0
             );
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: 10,
                     price: 20,
                     nonce: 77,
                     productIndex: productId,
-                    orderSide: OrderSide.SELL
+                    orderSide: OrderLogic.OrderSide.SELL
                 }),
                 isLiquidated,
                 0
@@ -661,13 +662,13 @@ contract ExchangeTest is Test {
                 makerEncodedOrder = _encodeOrderWithSigner(
                     makerSigner,
                     maliciousSignerKey,
-                    LibOrder.Order({
+                    OrderLogic.Order({
                         sender: maker,
                         size: 0,
                         price: 0,
                         nonce: 33,
                         productIndex: productId,
-                        orderSide: OrderSide.BUY
+                        orderSide: OrderLogic.OrderSide.BUY
                     }),
                     isLiquidated,
                     0
@@ -676,13 +677,13 @@ contract ExchangeTest is Test {
                 takerEncodedOrder = _encodeOrderWithSigner(
                     takerSigner,
                     maliciousSignerKey,
-                    LibOrder.Order({
+                    OrderLogic.Order({
                         sender: taker,
                         size: 0,
                         price: 0,
                         nonce: 88,
                         productIndex: productId,
-                        orderSide: OrderSide.SELL
+                        orderSide: OrderLogic.OrderSide.SELL
                     }),
                     isLiquidated,
                     0
@@ -710,8 +711,8 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 70;
         generalOrder.takerNonce = 30;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.fee =
             IOrderBook.Fee({maker: 2 * 1e12, taker: 3 * 1e12, referralRebate: 0, liquidationPenalty: 4e14});
         bytes memory operation;
@@ -722,7 +723,7 @@ contract ExchangeTest is Test {
             bool makerIsLiquidated = false;
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -734,7 +735,7 @@ contract ExchangeTest is Test {
                 generalOrder.fee.maker
             );
             bytes memory takerEncodedOrder = _encodeLiquidatedOrder(
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -790,13 +791,13 @@ contract ExchangeTest is Test {
         bool makerIsLiquidated = false;
         bytes memory makerEncodedOrder = _encodeOrder(
             makerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: 0,
                 price: 0,
                 nonce: 50,
                 productIndex: productId,
-                orderSide: OrderSide.BUY
+                orderSide: OrderLogic.OrderSide.BUY
             }),
             makerIsLiquidated,
             0
@@ -804,13 +805,13 @@ contract ExchangeTest is Test {
 
         bool takerIsLiquidated = false;
         bytes memory takerEncodedOrder = _encodeLiquidatedOrder(
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: 0,
                 price: 0,
                 nonce: 60,
                 productIndex: productId,
-                orderSide: OrderSide.SELL
+                orderSide: OrderLogic.OrderSide.SELL
             }),
             takerIsLiquidated,
             0
@@ -836,13 +837,13 @@ contract ExchangeTest is Test {
         bool makerIsLiquidated = true;
         bytes memory makerEncodedOrder = _encodeOrder(
             makerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: 0,
                 price: 0,
                 nonce: 50,
                 productIndex: productId,
-                orderSide: OrderSide.BUY
+                orderSide: OrderLogic.OrderSide.BUY
             }),
             makerIsLiquidated,
             0
@@ -850,13 +851,13 @@ contract ExchangeTest is Test {
 
         bool takerIsLiquidated = true;
         bytes memory takerEncodedOrder = _encodeLiquidatedOrder(
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: 0,
                 price: 0,
                 nonce: 60,
                 productIndex: productId,
-                orderSide: OrderSide.SELL
+                orderSide: OrderLogic.OrderSide.SELL
             }),
             takerIsLiquidated,
             0
@@ -883,13 +884,13 @@ contract ExchangeTest is Test {
         bool makerIsLiquidated = false;
         bytes memory makerEncodedOrder = _encodeOrder(
             makerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: 0,
                 price: 0,
                 nonce: 66,
                 productIndex: makerProductId,
-                orderSide: OrderSide.BUY
+                orderSide: OrderLogic.OrderSide.BUY
             }),
             makerIsLiquidated,
             0
@@ -897,13 +898,13 @@ contract ExchangeTest is Test {
 
         uint8 takerProductId = 2;
         bytes memory takerEncodedOrder = _encodeLiquidatedOrder(
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: 0,
                 price: 0,
                 nonce: 77,
                 productIndex: takerProductId,
-                orderSide: OrderSide.SELL
+                orderSide: OrderLogic.OrderSide.SELL
             }),
             isLiquidated,
             0
@@ -930,25 +931,25 @@ contract ExchangeTest is Test {
         bool makerIsLiquidated = false;
         bytes memory makerEncodedOrder = _encodeOrder(
             maliciousSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: 0,
                 price: 0,
                 nonce: 66,
                 productIndex: productId,
-                orderSide: OrderSide.BUY
+                orderSide: OrderLogic.OrderSide.BUY
             }),
             makerIsLiquidated,
             0
         );
         bytes memory takerEncodedOrder = _encodeLiquidatedOrder(
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: 0,
                 price: 0,
                 nonce: 77,
                 productIndex: productId,
-                orderSide: OrderSide.SELL
+                orderSide: OrderLogic.OrderSide.SELL
             }),
             isLiquidated,
             0
@@ -976,25 +977,25 @@ contract ExchangeTest is Test {
         bytes memory makerEncodedOrder = _encodeOrderWithSigner(
             makerSigner,
             maliciousSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: 0,
                 price: 0,
                 nonce: 77,
                 productIndex: productId,
-                orderSide: OrderSide.BUY
+                orderSide: OrderLogic.OrderSide.BUY
             }),
             makerIsLiquidated,
             0
         );
         bytes memory takerEncodedOrder = _encodeLiquidatedOrder(
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: 0,
                 price: 0,
                 nonce: 77,
                 productIndex: productId,
-                orderSide: OrderSide.SELL
+                orderSide: OrderLogic.OrderSide.SELL
             }),
             isLiquidated,
             0
@@ -1021,13 +1022,13 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 66;
         generalOrder.takerNonce = 77;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.fee = IOrderBook.Fee({maker: 2 * 1e12, taker: 3 * 1e12, referralRebate: 0, liquidationPenalty: 0});
 
         bytes memory makerEncodedOrder = _encodeOrder(
             makerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: generalOrder.size,
                 price: generalOrder.price,
@@ -1041,7 +1042,7 @@ contract ExchangeTest is Test {
 
         bytes memory takerEncodedOrder = _encodeOrder(
             takerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: generalOrder.size,
                 price: generalOrder.price,
@@ -1141,8 +1142,8 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 66;
         generalOrder.takerNonce = 77;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.fee =
             IOrderBook.Fee({maker: 2 * 1e12, taker: 3 * 1e12, referralRebate: 0, liquidationPenalty: 4e12});
 
@@ -1152,7 +1153,7 @@ contract ExchangeTest is Test {
         {
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -1166,7 +1167,7 @@ contract ExchangeTest is Test {
 
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -1279,13 +1280,13 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 66;
         generalOrder.takerNonce = 77;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.fee = IOrderBook.Fee({maker: 2 * 1e12, taker: 3 * 1e12, referralRebate: 0, liquidationPenalty: 0});
 
         bytes memory makerEncodedOrder = _encodeOrder(
             makerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: maker,
                 size: generalOrder.size,
                 price: generalOrder.price,
@@ -1299,7 +1300,7 @@ contract ExchangeTest is Test {
 
         bytes memory takerEncodedOrder = _encodeOrder(
             takerSignerKey,
-            LibOrder.Order({
+            OrderLogic.Order({
                 sender: taker,
                 size: generalOrder.size,
                 price: generalOrder.price,
@@ -1359,8 +1360,8 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 66;
         generalOrder.takerNonce = 77;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.sequencerFee = 3 * 1e12;
 
         int128 rebateMaker = -2 * 1e12;
@@ -1377,7 +1378,7 @@ contract ExchangeTest is Test {
         {
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -1391,7 +1392,7 @@ contract ExchangeTest is Test {
 
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -1480,8 +1481,8 @@ contract ExchangeTest is Test {
         generalOrder.price = 75_000 * 1e18;
         generalOrder.makerNonce = 66;
         generalOrder.takerNonce = 77;
-        generalOrder.makerSide = OrderSide.BUY;
-        generalOrder.takerSide = OrderSide.SELL;
+        generalOrder.makerSide = OrderLogic.OrderSide.BUY;
+        generalOrder.takerSide = OrderLogic.OrderSide.SELL;
         generalOrder.sequencerFee = 5 * 1e12;
 
         int128 rebateMaker = -2 * 1e12;
@@ -1499,7 +1500,7 @@ contract ExchangeTest is Test {
         {
             bytes memory makerEncodedOrder = _encodeOrder(
                 makerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: maker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -1513,7 +1514,7 @@ contract ExchangeTest is Test {
 
             bytes memory takerEncodedOrder = _encodeOrder(
                 takerSignerKey,
-                LibOrder.Order({
+                OrderLogic.Order({
                     sender: taker,
                     size: generalOrder.size,
                     price: generalOrder.price,
@@ -2184,7 +2185,7 @@ contract ExchangeTest is Test {
         exchange.processBatch(data);
     }
 
-    function _encodeOrder(uint256 signerKey, LibOrder.Order memory order, bool isLiquidated, int128 tradingFee)
+    function _encodeOrder(uint256 signerKey, OrderLogic.Order memory order, bool isLiquidated, int128 tradingFee)
         private
         view
         returns (bytes memory)
@@ -2196,7 +2197,7 @@ contract ExchangeTest is Test {
     function _encodeOrderWithSigner(
         address signer,
         uint256 signerKey,
-        LibOrder.Order memory order,
+        OrderLogic.Order memory order,
         bool isLiquidated,
         int128 tradingFee
     ) private view returns (bytes memory) {
@@ -2204,7 +2205,7 @@ contract ExchangeTest is Test {
             signerKey,
             keccak256(
                 abi.encode(
-                    exchange.ORDER_TYPEHASH(),
+                    ORDER_TYPEHASH,
                     order.sender,
                     order.size,
                     order.price,
@@ -2228,7 +2229,7 @@ contract ExchangeTest is Test {
         );
     }
 
-    function _encodeLiquidatedOrder(LibOrder.Order memory order, bool isLiquidated, int128 tradingFee)
+    function _encodeLiquidatedOrder(OrderLogic.Order memory order, bool isLiquidated, int128 tradingFee)
         private
         pure
         returns (bytes memory)

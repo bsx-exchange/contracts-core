@@ -6,48 +6,32 @@ import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/crypt
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {IBSX1000x} from "../1000x/interfaces/IBSX1000x.sol";
 import {ExchangeStorage} from "./ExchangeStorage.sol";
 import {IExchange, ILiquidation, ISwap} from "./interfaces/IExchange.sol";
-import {IOrderBook} from "./interfaces/IOrderBook.sol";
-import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
-import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
-import {Percentage} from "./lib/Percentage.sol";
 import {BalanceLogic} from "./lib/logic/BalanceLogic.sol";
+import {GenericLogic} from "./lib/logic/GenericLogic.sol";
 import {LiquidationLogic} from "./lib/logic/LiquidationLogic.sol";
+import {OrderLogic} from "./lib/logic/OrderLogic.sol";
 import {SwapLogic} from "./lib/logic/SwapLogic.sol";
-import {MAX_REBATE_RATE, NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
-import {OrderSide} from "./share/Enums.sol";
+import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
 
 /// @title Exchange contract
 /// @notice This contract is entry point of the exchange
 /// @dev This contract is upgradeable
 contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchange {
     using EnumerableSet for EnumerableSet.AddressSet;
-    using LibOrder for LibOrder.Order;
     using SafeERC20 for IERC20;
-    using Percentage for uint128;
     using MathHelper for uint128;
     using MathHelper for uint256;
-    using MathHelper for int128;
     using MathHelper for int256;
 
     bytes32 public constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
     bytes32 public constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
-    bytes32 public constant SWAP_TYPEHASH = keccak256(
-        "Swap(address account,address assetIn,uint256 amountIn,address assetOut,uint256 minAmountOut,uint256 nonce)"
-    );
-    bytes32 public constant WITHDRAW_TYPEHASH =
-        keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
-    bytes32 public constant TRANSFER_TO_BSX1000_TYPEHASH =
-        keccak256("TransferToBSX1000(address account,address token,uint256 amount,uint256 nonce)");
-    bytes32 public constant ORDER_TYPEHASH =
-        keccak256("Order(address sender,uint128 size,uint128 price,uint64 nonce,uint8 productIndex,uint8 orderSide)");
 
     function _checkRole(bytes32 role, address account) internal view {
         if (!access.hasRole(role, account)) {
@@ -77,6 +61,13 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     modifier enabledDeposit() {
         if (!canDeposit) {
             revert Errors.Exchange_DisabledDeposit();
+        }
+        _;
+    }
+
+    modifier enabledWithdraw() {
+        if (!canWithdraw) {
+            revert Errors.Exchange_DisabledWithdraw();
         }
         _;
     }
@@ -247,26 +238,8 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @inheritdoc ISwap
     function innerSwapWithPermit(SwapParams calldata params) external internalCall returns (uint256 amountOutX18) {
-        // check signature
-        bytes32 swapCollateralHash = _hashTypedDataV4(
-            keccak256(
-                abi.encode(
-                    SWAP_TYPEHASH,
-                    params.account,
-                    params.assetIn,
-                    params.amountIn,
-                    params.assetOut,
-                    params.minAmountOut,
-                    params.nonce
-                )
-            )
-        );
-        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(params.account, swapCollateralHash, params.signature)) {
-            revert Errors.Exchange_InvalidSignature(params.account);
-        }
-        isSwapNonceUsed[params.account][params.nonce] = true;
-
         return SwapLogic.executeSwap(
+            isSwapNonceUsed,
             _collectedFee,
             this,
             SwapLogic.SwapEngines({
@@ -342,6 +315,11 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
+    function hashTypedDataV4(bytes32 structHash) external view returns (bytes32) {
+        return _hashTypedDataV4(structHash);
+    }
+
+    /// @inheritdoc IExchange
     function balanceOf(address user, address token) public view returns (int256) {
         int256 balance = spotEngine.getBalance(token, user);
         return balance;
@@ -349,7 +327,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @inheritdoc IExchange
     function getSupportedTokenList() public view returns (address[] memory tokenList) {
-        uint8 length = uint8(supportedTokens.length());
+        uint256 length = supportedTokens.length();
         tokenList = new address[](length);
         for (uint256 index = 0; index < length; index++) {
             tokenList[index] = supportedTokens.at(index);
@@ -381,106 +359,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             revert Errors.Exchange_InvalidTransactionId(transactionId, executedTransactionCounter);
         }
         executedTransactionCounter++;
-        if (operationType == OperationType.MatchLiquidationOrders) {
-            LibOrder.SignedOrder memory maker;
-            LibOrder.SignedOrder memory taker;
-            IOrderBook.Fee memory matchFee;
-            IOrderBook.OrderHash memory digest;
-
-            // 165 bytes for an order
-            (maker.order, maker.signature, maker.signer, maker.isLiquidation, matchFee.maker) =
-                _parseDataToOrder(data[5:169]);
-            digest.maker = _getOrderDigest(maker.order);
-
-            // 165 bytes for an order
-            (taker.order, taker.signature, taker.signer, taker.isLiquidation, matchFee.taker) =
-                _parseDataToOrder(data[169:333]);
-            uint128 takerSequencerFee = uint128(bytes16(data[333:349])); //16 bytes for takerSequencerFee
-            digest.taker = _getOrderDigest(taker.order);
-
-            if (!taker.isLiquidation) {
-                revert Errors.Exchange_NotLiquidatedOrder(transactionId);
-            }
-            if (maker.isLiquidation) {
-                revert Errors.Exchange_MakerLiquidatedOrder(transactionId);
-            }
-
-            _verifySignature(maker.signer, digest.maker, maker.signature);
-            if (!isSigningWallet(maker.order.sender, maker.signer)) {
-                revert Errors.Exchange_UnauthorizedSigner(maker.order.sender, maker.signer);
-            }
-
-            if (maker.order.productIndex != taker.order.productIndex) {
-                revert Errors.Exchange_ProductIdMismatch();
-            }
-
-            // 20 bytes is makerReferrer
-            // 2 bytes is makerReferrerRebateRate
-            // 20 bytes is takerReferrer
-            // 2 bytes is takerReferrerRebateRate
-            if (data.length > 349) {
-                (address makerReferrer, uint16 makerReferrerRebateRate) = _parseReferralData(data[349:371]);
-                matchFee.referralRebate += _rebateReferrer(matchFee.maker, makerReferrer, makerReferrerRebateRate);
-
-                (address takerReferrer, uint16 takerReferrerRebateRate) = _parseReferralData(data[371:393]);
-                matchFee.referralRebate += _rebateReferrer(matchFee.taker, takerReferrer, takerReferrerRebateRate);
-            }
-            matchFee.maker = _rebateMaker(maker.order.sender, matchFee.maker);
-
-            // 16 bytes is liquidation fee
-            if (data.length > 393) {
-                uint128 liquidationFee = uint128(bytes16(data[393:409])); //16 bytes for liquidation fee
-                matchFee.liquidationPenalty = liquidationFee;
-            }
-
-            book.matchOrders(maker, taker, digest, maker.order.productIndex, takerSequencerFee, matchFee);
-        } else if (operationType == OperationType.MatchOrders) {
-            LibOrder.SignedOrder memory maker;
-            LibOrder.SignedOrder memory taker;
-            IOrderBook.Fee memory matchFee;
-            IOrderBook.OrderHash memory digest;
-
-            // 165 bytes for an order
-            (maker.order, maker.signature, maker.signer, maker.isLiquidation, matchFee.maker) =
-                _parseDataToOrder(data[5:169]);
-            digest.maker = _getOrderDigest(maker.order);
-            _verifySignature(maker.signer, digest.maker, maker.signature);
-            if (!isSigningWallet(maker.order.sender, maker.signer)) {
-                revert Errors.Exchange_UnauthorizedSigner(maker.order.sender, maker.signer);
-            }
-            // 165 bytes for an order
-            (taker.order, taker.signature, taker.signer, taker.isLiquidation, matchFee.taker) =
-                _parseDataToOrder(data[169:333]);
-            uint128 takerSequencerFee = uint128(bytes16(data[333:349])); //16 bytes for takerSequencerFee
-            digest.taker = _getOrderDigest(taker.order);
-
-            if (taker.isLiquidation || maker.isLiquidation) {
-                revert Errors.Exchange_LiquidatedOrder(transactionId);
-            }
-
-            _verifySignature(taker.signer, digest.taker, taker.signature);
-            if (!isSigningWallet(taker.order.sender, taker.signer)) {
-                revert Errors.Exchange_UnauthorizedSigner(taker.order.sender, taker.signer);
-            }
-
-            if (maker.order.productIndex != taker.order.productIndex) {
-                revert Errors.Exchange_ProductIdMismatch();
-            }
-
-            // 20 bytes is makerReferrer
-            // 2 bytes is makerReferrerRebateRate
-            // 20 bytes is takerReferrer
-            // 2 bytes is takerReferrerRebateRate
-            if (data.length > 349) {
-                (address makerReferrer, uint16 makerReferrerRebateRate) = _parseReferralData(data[349:371]);
-                matchFee.referralRebate += _rebateReferrer(matchFee.maker, makerReferrer, makerReferrerRebateRate);
-
-                (address takerReferrer, uint16 takerReferrerRebateRate) = _parseReferralData(data[371:393]);
-                matchFee.referralRebate += _rebateReferrer(matchFee.taker, takerReferrer, takerReferrerRebateRate);
-            }
-            matchFee.maker = _rebateMaker(maker.order.sender, matchFee.maker);
-
-            book.matchOrders(maker, taker, digest, maker.order.productIndex, takerSequencerFee, matchFee);
+        if (operationType == OperationType.MatchOrders) {
+            _matchOrders(data);
+        } else if (operationType == OperationType.MatchLiquidationOrders) {
+            _matchLiquidationOrders(data);
         } else if (operationType == OperationType.UpdateFundingRate) {
             (uint8 productIndex, int128 priceDiff, uint128 lastFundingRateUpdateSequenceNumber) =
                 abi.decode(data[5:], (uint8, int128, uint128));
@@ -509,30 +391,21 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         }
     }
 
+    /// @dev Handles matching normal orders
+    function _matchOrders(bytes calldata data) internal {
+        OrderLogic.matchOrders(this, OrderLogic.OrderEngine(book, spotEngine), data);
+    }
+
+    /// @dev Handles matching liquidation orders
+    function _matchLiquidationOrders(bytes calldata data) internal {
+        OrderLogic.matchLiquidationOrders(this, OrderLogic.OrderEngine(book, spotEngine), data);
+    }
+
     /// @dev Handles a withdraw
-    function _withdraw(Withdraw memory data) internal {
-        if (!canWithdraw) {
-            revert Errors.Exchange_DisabledWithdraw();
-        }
-        if (isWithdrawNonceUsed[data.sender][data.nonce]) {
-            revert Errors.Exchange_Withdraw_NonceUsed(data.sender, data.nonce);
-        }
-        isWithdrawNonceUsed[data.sender][data.nonce] = true;
-
-        bytes32 digest =
-            _hashTypedDataV4(keccak256(abi.encode(WITHDRAW_TYPEHASH, data.sender, data.token, data.amount, data.nonce)));
-
-        // only EOA can withdraw ETH
-        bool isValidSignature = data.token == NATIVE_ETH
-            ? ECDSA.recover(digest, data.signature) == data.sender
-            : UNIVERSAL_SIG_VALIDATOR.isValidSig(data.sender, digest, data.signature);
-
-        if (!isValidSignature) {
-            emit WithdrawFailed(data.sender, data.nonce, 0, 0);
-            return;
-        }
-
-        BalanceLogic.withdraw(_collectedFee, BalanceLogic.BalanceEngine(clearingService, spotEngine), data);
+    function _withdraw(Withdraw memory data) internal enabledWithdraw {
+        BalanceLogic.withdraw(
+            isWithdrawNonceUsed, _collectedFee, this, BalanceLogic.BalanceEngine(clearingService, spotEngine), data
+        );
     }
 
     function _transferToBSX1000(TransferToBSX1000Params memory data) internal {
@@ -552,73 +425,13 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         }
     }
 
-    function innerTransferToBSX1000(TransferToBSX1000Params memory data)
+    function innerTransferToBSX1000(TransferToBSX1000Params memory params)
         external
         internalCall
         returns (uint256 balance)
     {
-        bytes32 digest = _hashTypedDataV4(
-            keccak256(abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, data.account, data.token, data.amount, data.nonce))
-        );
-        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(data.account, digest, data.signature)) {
-            revert Errors.Exchange_InvalidSignature(data.account);
-        }
-
         return BalanceLogic.transferToBSX1000(
-            BalanceLogic.BalanceEngine(clearingService, spotEngine),
-            IBSX1000x(access.getBsx1000()),
-            data.account,
-            data.token,
-            data.amount
-        );
-    }
-
-    /// @dev Parse encoded data to order
-    function _parseDataToOrder(bytes calldata data)
-        internal
-        pure
-        returns (LibOrder.Order memory, bytes memory signature, address signer, bool isLiquidation, int128 matchFee)
-    {
-        //Fisrt 20 bytes is sender
-        //next  16 bytes is size
-        //next  16 bytes is price
-        //next  8 bytes is nonce
-        //next  1 byte is product index
-        //next  1 byte is order side
-        //next  65 bytes is signature
-        //next  20 bytes is signer
-        //next  1 byte is isLiquidation
-        //next  16 bytes is match fee
-        //sum 164
-        LibOrder.Order memory order;
-        order.sender = address(bytes20(data[0:20]));
-        order.size = uint128(bytes16(data[20:36]));
-        order.price = uint128(bytes16(data[36:52]));
-        order.nonce = uint64(bytes8(data[52:60]));
-        order.productIndex = uint8(data[60]);
-        order.orderSide = OrderSide(uint8(data[61]));
-        signature = data[62:127];
-        signer = address(bytes20(data[127:147]));
-        isLiquidation = uint8(data[147]) == 1;
-        matchFee = int128(uint128(bytes16(data[148:164])));
-
-        return (order, signature, signer, isLiquidation, matchFee);
-    }
-
-    /// @dev Hash an order using EIP712
-    function _getOrderDigest(LibOrder.Order memory order) internal view returns (bytes32) {
-        return _hashTypedDataV4(
-            keccak256(
-                abi.encode(
-                    ORDER_TYPEHASH,
-                    order.sender,
-                    order.size,
-                    order.price,
-                    order.nonce,
-                    order.productIndex,
-                    order.orderSide
-                )
-            )
+            this, IBSX1000x(access.getBsx1000()), BalanceLogic.BalanceEngine(clearingService, spotEngine), params
         );
     }
 
@@ -639,7 +452,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         bytes memory senderSignature,
         bytes memory signerSignature
     ) internal {
-        _verifySigningNonce(sender, nonce);
+        if (isRegisterSignerNonceUsed[sender][nonce]) {
+            revert Errors.Exchange_AddSigningWallet_UsedNonce(sender, nonce);
+        }
 
         // verify signature of sender
         bytes32 registerHash = _hashTypedDataV4(
@@ -651,75 +466,11 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
         // verify signature of authorized signer
         bytes32 signKeyHash = _hashTypedDataV4(keccak256(abi.encode(SIGN_KEY_TYPEHASH, sender)));
-        _verifySignature(signer, signKeyHash, signerSignature);
+        GenericLogic.verifySignature(signer, signKeyHash, signerSignature);
 
         _signingWallets[sender][signer] = true;
         isRegisterSignerNonceUsed[sender][nonce] = true;
 
         emit RegisterSigner(sender, signer, nonce);
-    }
-
-    /// @dev Validates a signature
-    function _verifySignature(address signer, bytes32 digest, bytes memory signature) internal pure {
-        address recoveredSigner = ECDSA.recover(digest, signature);
-        if (recoveredSigner != signer) {
-            revert Errors.Exchange_InvalidSignerSignature(recoveredSigner, signer);
-        }
-    }
-
-    /// @dev Checks if a nonce is used for adding a signing wallet, revert if nonce is used
-    function _verifySigningNonce(address sender, uint64 nonce) internal view {
-        if (isRegisterSignerNonceUsed[sender][nonce]) {
-            revert Errors.Exchange_AddSigningWallet_UsedNonce(sender, nonce);
-        }
-    }
-
-    /// @dev Parses referral data from encoded data
-    /// @param data Encoded data
-    function _parseReferralData(bytes calldata data)
-        internal
-        pure
-        returns (address referrer, uint16 referrerRebateRate)
-    {
-        // 20 bytes is referrer
-        // 2 bytes is referrer rebate rate
-        referrer = address(bytes20(data[0:20]));
-        referrerRebateRate = uint16(bytes2(data[20:22]));
-    }
-
-    /// @dev Calculate the fee and rebate for an order
-    function _rebateReferrer(int128 fee, address referrer, uint16 rebateRate) internal returns (uint128 rebate) {
-        if (referrer == address(0) || rebateRate == 0 || fee <= 0) {
-            return 0;
-        }
-
-        if (rebateRate > MAX_REBATE_RATE) {
-            revert Errors.Exchange_ExceededMaxRebateRate(rebateRate, MAX_REBATE_RATE);
-        }
-
-        rebate = fee.safeUInt128().calculatePercentage(rebateRate);
-
-        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
-        productDeltas[0] = ISpot.AccountDelta(book.getCollateralToken(), referrer, rebate.safeInt128());
-        spotEngine.modifyAccount(productDeltas);
-
-        emit RebateReferrer(referrer, rebate);
-    }
-
-    /// @dev Rebate maker if the fee is defined as negative
-    /// @return Maker fee after rebate
-    function _rebateMaker(address maker, int128 fee) internal returns (int128) {
-        if (fee >= 0) {
-            return fee;
-        }
-
-        uint128 rebate = fee.abs();
-        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
-        productDeltas[0] = ISpot.AccountDelta(book.getCollateralToken(), maker, rebate.safeInt128());
-        spotEngine.modifyAccount(productDeltas);
-
-        emit RebateMaker(maker, rebate);
-
-        return 0;
     }
 }

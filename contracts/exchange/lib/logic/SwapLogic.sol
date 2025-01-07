@@ -14,7 +14,7 @@ import {IUniversalRouter} from "../../interfaces/external/IUniversalRouter.sol";
 import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
 import {Percentage} from "../../lib/Percentage.sol";
-import {MAX_SWAP_FEE_RATE} from "../../share/Constants.sol";
+import {MAX_SWAP_FEE_RATE, UNIVERSAL_SIG_VALIDATOR} from "../../share/Constants.sol";
 import {GenericLogic} from "./GenericLogic.sol";
 
 library SwapLogic {
@@ -24,6 +24,10 @@ library SwapLogic {
     using SafeCast for int256;
     using SafeCast for uint256;
     using SafeERC20 for IERC20;
+
+    bytes32 public constant SWAP_TYPEHASH = keccak256(
+        "Swap(address account,address assetIn,uint256 amountIn,address assetOut,uint256 minAmountOut,uint256 nonce)"
+    );
 
     /// @notice Performs batch collateral swaps for multiple accounts using permit
     /// @dev Emits the `SwapCollateral()` event for each collateral swap
@@ -76,11 +80,31 @@ library SwapLogic {
     /// @param params The swap parameters
     /// @return amountOutX18 The scaled amount out of the swap (in 18 decimals)
     function executeSwap(
+        mapping(address => mapping(uint256 => bool)) storage isSwapNonceUsed,
         mapping(address token => uint256 collectedFee) storage collectedFees,
         Exchange exchange,
         SwapEngines calldata engines,
         ISwap.SwapParams calldata params
     ) external returns (uint256 amountOutX18) {
+        // check signature
+        bytes32 swapCollateralHash = exchange.hashTypedDataV4(
+            keccak256(
+                abi.encode(
+                    SWAP_TYPEHASH,
+                    params.account,
+                    params.assetIn,
+                    params.amountIn,
+                    params.assetOut,
+                    params.minAmountOut,
+                    params.nonce
+                )
+            )
+        );
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(params.account, swapCollateralHash, params.signature)) {
+            revert Errors.Exchange_InvalidSignature(params.account);
+        }
+        isSwapNonceUsed[params.account][params.nonce] = true;
+
         // check asset
         if (!exchange.isSupportedToken(params.assetIn) || !exchange.isSupportedToken(params.assetOut)) {
             revert Errors.Exchange_Swap_InvalidAsset();

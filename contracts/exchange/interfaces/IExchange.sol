@@ -270,6 +270,9 @@ interface IExchange is ILiquidation, ISwap {
     /// @param token Token address
     function getSequencerFees(address token) external view returns (uint256);
 
+    /// @notice Gets hash of typed data v4
+    function hashTypedDataV4(bytes32 structHash) external view returns (bytes32);
+
     /// @dev Checks whether the signer is authorized to sign on behalf of the sender
     function isSigningWallet(address sender, address signer) external view returns (bool);
 

@@ -40,6 +40,9 @@ contract SwapExchangeTest is Test {
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant SWAP_TYPEHASH = keccak256(
+        "Swap(address account,address assetIn,uint256 amountIn,address assetOut,uint256 minAmountOut,uint256 nonce)"
+    );
 
     function setUp() public {
         vm.startPrank(sequencer);
@@ -116,15 +119,7 @@ contract SwapExchangeTest is Test {
         bytes memory signature = _signTypedDataHash(
             userKey,
             keccak256(
-                abi.encode(
-                    exchange.SWAP_TYPEHASH(),
-                    user,
-                    address(tokenIn),
-                    amountInX18,
-                    address(tokenOut),
-                    amountOutX18,
-                    nonce
-                )
+                abi.encode(SWAP_TYPEHASH, user, address(tokenIn), amountInX18, address(tokenOut), amountOutX18, nonce)
             )
         );
 
@@ -303,7 +298,7 @@ contract SwapExchangeTest is Test {
             maliciousSignerKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -330,7 +325,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -349,7 +344,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -374,7 +369,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -400,7 +395,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -442,7 +437,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -477,7 +472,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -513,7 +508,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -549,7 +544,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -589,7 +584,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,
@@ -629,7 +624,7 @@ contract SwapExchangeTest is Test {
             userKey,
             keccak256(
                 abi.encode(
-                    exchange.SWAP_TYPEHASH(),
+                    SWAP_TYPEHASH,
                     user,
                     params.assetIn,
                     params.amountIn,

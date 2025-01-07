@@ -9,11 +9,10 @@ import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IPerp} from "./interfaces/IPerp.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
-import {LibOrder} from "./lib/LibOrder.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
+import {OrderLogic} from "./lib/logic/OrderLogic.sol";
 import {MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEE_RATE, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
-import {OrderSide} from "./share/Enums.sol";
 
 /// @title Orderbook contract
 /// @notice This contract is used for matching orders
@@ -67,8 +66,8 @@ contract OrderBook is IOrderBook, Initializable {
     /// @inheritdoc IOrderBook
     // solhint-disable code-complexity
     function matchOrders(
-        LibOrder.SignedOrder calldata maker,
-        LibOrder.SignedOrder calldata taker,
+        OrderLogic.SignedOrder calldata maker,
+        OrderLogic.SignedOrder calldata taker,
         OrderHash calldata digest,
         uint8 productIndex,
         uint128 takerSequencerFee,
@@ -94,7 +93,7 @@ contract OrderBook is IOrderBook, Initializable {
 
         Delta memory takerDelta;
         Delta memory makerDelta;
-        if (taker.order.orderSide == OrderSide.SELL) {
+        if (taker.order.orderSide == OrderLogic.OrderSide.SELL) {
             takerDelta.productAmount = -fillAmount.safeInt128();
             makerDelta.productAmount = fillAmount.safeInt128();
             takerDelta.quoteAmount = price.mul18D(fillAmount).safeInt128();
@@ -242,11 +241,11 @@ contract OrderBook is IOrderBook, Initializable {
         return (newQuote, newSize);
     }
 
-    function _validatePrice(OrderSide makerSide, uint128 makerPrice, uint128 takerPrice) internal pure {
-        if (makerSide == OrderSide.BUY && makerPrice < takerPrice) {
+    function _validatePrice(OrderLogic.OrderSide makerSide, uint128 makerPrice, uint128 takerPrice) internal pure {
+        if (makerSide == OrderLogic.OrderSide.BUY && makerPrice < takerPrice) {
             revert Errors.Orderbook_InvalidOrderPrice();
         }
-        if (makerSide == OrderSide.SELL && makerPrice > takerPrice) {
+        if (makerSide == OrderLogic.OrderSide.SELL && makerPrice > takerPrice) {
             revert Errors.Orderbook_InvalidOrderPrice();
         }
     }

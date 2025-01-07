@@ -9,15 +9,14 @@ import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
-import {LibOrder} from "contracts/exchange/lib/LibOrder.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
+import {OrderLogic} from "contracts/exchange/lib/logic/OrderLogic.sol";
 import {
     MAX_LIQUIDATION_FEE_RATE,
     MAX_MATCH_FEE_RATE,
     MAX_TAKER_SEQUENCER_FEE
 } from "contracts/exchange/share/Constants.sol";
-import {OrderSide} from "contracts/exchange/share/Enums.sol";
 
 contract OrderbookTest is Test {
     using MathHelper for uint128;
@@ -102,8 +101,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_makerGoLong() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
 
         bool isLiquidation = false;
@@ -152,8 +151,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_makerGoShort() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
 
         bool isLiquidation = false;
@@ -204,8 +203,8 @@ contract OrderbookTest is Test {
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
         uint128 takerSequencerFee;
@@ -232,8 +231,8 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         bool isLiquidation = false;
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
         uint128 takerSequencerFee;
@@ -269,8 +268,8 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         bool isLiquidation = false;
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
         uint128 takerSequencerFee;
@@ -310,8 +309,8 @@ contract OrderbookTest is Test {
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee =
             IOrderBook.Fee({maker: 2e14, taker: 4e14, referralRebate: 5e12, liquidationPenalty: 5e14});
@@ -349,8 +348,8 @@ contract OrderbookTest is Test {
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee =
             IOrderBook.Fee({maker: 2e14, taker: 4e14, referralRebate: 5e12, liquidationPenalty: 5e14});
@@ -396,8 +395,8 @@ contract OrderbookTest is Test {
 
         assertEq(MAX_LIQUIDATION_FEE_RATE, (10 * uint256(Percentage.ONE_HUNDRED_PERCENT)) / 100);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee = IOrderBook.Fee({
             maker: 2e14,
@@ -415,8 +414,8 @@ contract OrderbookTest is Test {
     }
 
     function test_matchOrders_revertsWhenUnauthorized() public {
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
 
@@ -433,8 +432,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_revertsWhenSameAccount() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
 
@@ -452,8 +451,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_revertsWhenSameSide() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
 
@@ -475,8 +474,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_revertsWhenNonceUsed() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory fulfilledMakerOrder;
-        LibOrder.SignedOrder memory fulfilledTakerOrder;
+        OrderLogic.SignedOrder memory fulfilledMakerOrder;
+        OrderLogic.SignedOrder memory fulfilledTakerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
 
@@ -487,12 +486,12 @@ contract OrderbookTest is Test {
         (fulfilledTakerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
         orderbook.matchOrders(fulfilledMakerOrder, fulfilledTakerOrder, digest, productId, 0, fee);
 
-        LibOrder.SignedOrder memory newTakerOrder;
+        OrderLogic.SignedOrder memory newTakerOrder;
         (newTakerOrder, digest.taker) = _createShortOrder(taker, size, price, makerNonce + 1, isLiquidation);
         vm.expectRevert(abi.encodeWithSelector(Errors.Orderbook_NonceUsed.selector, maker, makerNonce));
         orderbook.matchOrders(fulfilledMakerOrder, newTakerOrder, digest, productId, 0, fee);
 
-        LibOrder.SignedOrder memory newMakerOrder;
+        OrderLogic.SignedOrder memory newMakerOrder;
         (newMakerOrder, digest.maker) = _createLongOrder(maker, size, price, takerNonce + 1, isLiquidation);
         vm.expectRevert(abi.encodeWithSelector(Errors.Orderbook_NonceUsed.selector, taker, takerNonce));
         orderbook.matchOrders(newMakerOrder, fulfilledTakerOrder, digest, productId, 0, fee);
@@ -501,8 +500,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_revertsIfInvalidPrice() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
 
@@ -528,8 +527,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_revertsIfExceededMaxTradingFees() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
 
         bool isLiquidation = false;
@@ -556,8 +555,8 @@ contract OrderbookTest is Test {
     function test_matchOrders_revertsIfExceededMaxSequencerFees() public {
         vm.startPrank(exchange);
 
-        LibOrder.SignedOrder memory makerOrder;
-        LibOrder.SignedOrder memory takerOrder;
+        OrderLogic.SignedOrder memory makerOrder;
+        OrderLogic.SignedOrder memory takerOrder;
         IOrderBook.OrderHash memory digest;
         IOrderBook.Fee memory fee;
 
@@ -575,34 +574,36 @@ contract OrderbookTest is Test {
     function _createLongOrder(address account, uint128 size, uint128 price, uint64 nonce, bool isLiquidation)
         internal
         view
-        returns (LibOrder.SignedOrder memory signedOrder, bytes32 orderHash)
+        returns (OrderLogic.SignedOrder memory signedOrder, bytes32 orderHash)
     {
-        LibOrder.Order memory order = LibOrder.Order({
+        OrderLogic.Order memory order = OrderLogic.Order({
             sender: account,
             size: size,
             price: price,
             nonce: nonce,
             productIndex: productId,
-            orderSide: OrderSide.BUY
+            orderSide: OrderLogic.OrderSide.BUY
         });
-        signedOrder = LibOrder.SignedOrder({order: order, signature: "", signer: account, isLiquidation: isLiquidation});
-        orderHash = keccak256(abi.encode(account, size, price, nonce, OrderSide.BUY));
+        signedOrder =
+            OrderLogic.SignedOrder({order: order, signature: "", signer: account, isLiquidation: isLiquidation});
+        orderHash = keccak256(abi.encode(account, size, price, nonce, OrderLogic.OrderSide.BUY));
     }
 
     function _createShortOrder(address account, uint128 size, uint128 price, uint64 nonce, bool isLiquidation)
         internal
         view
-        returns (LibOrder.SignedOrder memory signedOrder, bytes32 orderHash)
+        returns (OrderLogic.SignedOrder memory signedOrder, bytes32 orderHash)
     {
-        LibOrder.Order memory order = LibOrder.Order({
+        OrderLogic.Order memory order = OrderLogic.Order({
             sender: account,
             size: size,
             price: price,
             nonce: nonce,
             productIndex: productId,
-            orderSide: OrderSide.SELL
+            orderSide: OrderLogic.OrderSide.SELL
         });
-        signedOrder = LibOrder.SignedOrder({order: order, signature: "", signer: account, isLiquidation: isLiquidation});
-        orderHash = keccak256(abi.encode(account, size, price, nonce, OrderSide.SELL));
+        signedOrder =
+            OrderLogic.SignedOrder({order: order, signature: "", signer: account, isLiquidation: isLiquidation});
+        orderHash = keccak256(abi.encode(account, size, price, nonce, OrderLogic.OrderSide.SELL));
     }
 }

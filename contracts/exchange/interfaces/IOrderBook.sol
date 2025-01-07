@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.23;
 
-import {LibOrder, OrderSide} from "../lib/LibOrder.sol";
+import {OrderLogic} from "../lib/logic/OrderLogic.sol";
 
 /// @title Orderbook
 /// @notice Match orders and manage fees
@@ -46,7 +46,7 @@ interface IOrderBook {
         uint8 indexed productIndex,
         address indexed maker,
         address indexed taker,
-        OrderSide makerSide,
+        OrderLogic.OrderSide makerSide,
         uint256 makerNonce,
         uint256 takerNonce,
         uint128 fillAmount,
@@ -64,8 +64,8 @@ interface IOrderBook {
     /// @param takerSequencerFee Fee of taker paid to the sequencer
     /// @param delta The fee delta
     function matchOrders(
-        LibOrder.SignedOrder memory maker,
-        LibOrder.SignedOrder memory taker,
+        OrderLogic.SignedOrder memory maker,
+        OrderLogic.SignedOrder memory taker,
         OrderHash memory digest,
         uint8 productIndex,
         uint128 takerSequencerFee,

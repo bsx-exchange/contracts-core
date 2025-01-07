@@ -23,7 +23,7 @@ import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR, WETH9} from "contracts/exchange/share/Constants.sol";
 
 // solhint-disable max-states-count
-contract ExchangeTest is Test {
+contract BalanceExchangeTest is Test {
     using stdStorage for StdStorage;
     using Helper for bytes;
     using Helper for uint128;
@@ -43,6 +43,10 @@ contract ExchangeTest is Test {
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant TRANSFER_TO_BSX1000_TYPEHASH =
+        keccak256("TransferToBSX1000(address account,address token,uint256 amount,uint256 nonce)");
+    bytes32 private constant WITHDRAW_TYPEHASH =
+        keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
 
     function setUp() public {
         vm.startPrank(sequencer);
@@ -456,9 +460,7 @@ contract ExchangeTest is Test {
         bytes memory signature = _signTypedDataHash(
             accountKey,
             keccak256(
-                abi.encode(
-                    exchange.TRANSFER_TO_BSX1000_TYPEHASH(), account, address(collateralToken), transferAmount, nonce
-                )
+                abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, account, address(collateralToken), transferAmount, nonce)
             )
         );
         bytes memory operation = _encodeDataToOperation(
@@ -526,11 +528,7 @@ contract ExchangeTest is Test {
             ownerKey,
             keccak256(
                 abi.encode(
-                    exchange.TRANSFER_TO_BSX1000_TYPEHASH(),
-                    contractAccount,
-                    address(collateralToken),
-                    transferAmount,
-                    nonce
+                    TRANSFER_TO_BSX1000_TYPEHASH, contractAccount, address(collateralToken), transferAmount, nonce
                 )
             )
         );
@@ -590,9 +588,7 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
             accountKey,
-            keccak256(
-                abi.encode(exchange.TRANSFER_TO_BSX1000_TYPEHASH(), account, address(collateralToken), amount, nonce)
-            )
+            keccak256(abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, account, address(collateralToken), amount, nonce))
         );
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.TransferToBSX1000,
@@ -624,9 +620,7 @@ contract ExchangeTest is Test {
         uint128 amount = 300 * 1e18;
         bytes memory signature = _signTypedDataHash(
             maliciousKey,
-            keccak256(
-                abi.encode(exchange.TRANSFER_TO_BSX1000_TYPEHASH(), account, address(collateralToken), amount, nonce)
-            )
+            keccak256(abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, account, address(collateralToken), amount, nonce))
         );
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.TransferToBSX1000,
@@ -671,8 +665,7 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
         uint128 amount = 100 * 1e18;
         bytes memory signature = _signTypedDataHash(
-            accountKey,
-            keccak256(abi.encode(exchange.TRANSFER_TO_BSX1000_TYPEHASH(), account, invalidToken, amount, nonce))
+            accountKey, keccak256(abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, account, invalidToken, amount, nonce))
         );
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.TransferToBSX1000,
@@ -717,9 +710,7 @@ contract ExchangeTest is Test {
         bytes memory signature = _signTypedDataHash(
             accountKey,
             keccak256(
-                abi.encode(
-                    exchange.TRANSFER_TO_BSX1000_TYPEHASH(), account, address(collateralToken), transferAmount, nonce
-                )
+                abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, account, address(collateralToken), transferAmount, nonce)
             )
         );
         bytes memory operation = _encodeDataToOperation(
@@ -768,9 +759,7 @@ contract ExchangeTest is Test {
         bytes memory signature = _signTypedDataHash(
             accountKey,
             keccak256(
-                abi.encode(
-                    exchange.TRANSFER_TO_BSX1000_TYPEHASH(), account, address(collateralToken), transferAmount, nonce
-                )
+                abi.encode(TRANSFER_TO_BSX1000_TYPEHASH, account, address(collateralToken), transferAmount, nonce)
             )
         );
         bytes memory operation = _encodeDataToOperation(
@@ -829,8 +818,7 @@ contract ExchangeTest is Test {
 
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
-            accountKey,
-            keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(collateralToken), amount, nonce))
+            accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, address(collateralToken), amount, nonce))
         );
         uint128 withdrawFee = 1 * 1e16;
         bytes memory operation = _encodeDataToOperation(
@@ -882,10 +870,7 @@ contract ExchangeTest is Test {
 
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
-            ownerKey,
-            keccak256(
-                abi.encode(exchange.WITHDRAW_TYPEHASH(), contractAccount, address(collateralToken), amount, nonce)
-            )
+            ownerKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, contractAccount, address(collateralToken), amount, nonce))
         );
         uint128 withdrawFee = 1 * 1e16;
         bytes memory operation = _encodeDataToOperation(
@@ -946,7 +931,7 @@ contract ExchangeTest is Test {
 
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
-            accountKey, keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(newToken), amount, nonce))
+            accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, address(newToken), amount, nonce))
         );
         uint128 withdrawFee = 1 * 1e16;
         bytes memory operation = _encodeDataToOperation(
@@ -991,9 +976,8 @@ contract ExchangeTest is Test {
         uint256 accountBalanceBefore = account.balance;
 
         uint64 nonce = 1;
-        bytes memory signature = _signTypedDataHash(
-            accountKey, keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, NATIVE_ETH, amount, nonce))
-        );
+        bytes memory signature =
+            _signTypedDataHash(accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, NATIVE_ETH, amount, nonce)));
         uint128 withdrawFee = 0.001 ether;
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
@@ -1038,7 +1022,7 @@ contract ExchangeTest is Test {
 
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
-            ownerKey, keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), contractAccount, NATIVE_ETH, amount, nonce))
+            ownerKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, contractAccount, NATIVE_ETH, amount, nonce))
         );
         uint128 withdrawFee = 0.001 ether;
         bytes memory operation = _encodeDataToOperation(
@@ -1097,10 +1081,7 @@ contract ExchangeTest is Test {
 
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
-            ownerKey,
-            keccak256(
-                abi.encode(exchange.WITHDRAW_TYPEHASH(), contractAccount, address(collateralToken), amount, nonce)
-            )
+            ownerKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, contractAccount, address(collateralToken), amount, nonce))
         );
         uint128 withdrawFee = 1 * 1e16;
         bytes memory operation = _encodeDataToOperation(
@@ -1134,8 +1115,7 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
         uint128 amount = 5 * 1e18;
         bytes memory signature = _signTypedDataHash(
-            accountKey,
-            keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(collateralToken), amount, nonce))
+            accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, address(collateralToken), amount, nonce))
         );
 
         // fee on stable tokens
@@ -1148,9 +1128,8 @@ contract ExchangeTest is Test {
         exchange.processBatch(operation.toArray());
 
         // fee on weth
-        signature = _signTypedDataHash(
-            accountKey, keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, WETH9, amount, nonce))
-        );
+        signature =
+            _signTypedDataHash(accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, WETH9, amount, nonce)));
         invalidFee = 0.001 ether + 1;
         operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
@@ -1181,8 +1160,7 @@ contract ExchangeTest is Test {
 
         uint64 nonce = 1;
         bytes memory signature = _signTypedDataHash(
-            accountKey,
-            keccak256(abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(collateralToken), amount, nonce))
+            accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, address(collateralToken), amount, nonce))
         );
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
@@ -1225,9 +1203,7 @@ contract ExchangeTest is Test {
         uint128 withdrawAmount = balance + 1;
         bytes memory signature = _signTypedDataHash(
             accountKey,
-            keccak256(
-                abi.encode(exchange.WITHDRAW_TYPEHASH(), account, address(collateralToken), withdrawAmount, nonce)
-            )
+            keccak256(abi.encode(WITHDRAW_TYPEHASH, account, address(collateralToken), withdrawAmount, nonce))
         );
         bytes memory data =
             abi.encode(IExchange.Withdraw(account, address(collateralToken), withdrawAmount, nonce, signature, 0));
