@@ -8,8 +8,14 @@ interface IVaultManager {
         bool isRegistered;
     }
 
-    /// @notice Emitted when a new vault is registered
-    event RegisterVault(address indexed vault, address indexed feeRecipient, uint256 profitShareBps);
+    struct VaultData {
+        uint256 totalShares;
+    }
+
+    struct StakerData {
+        uint256 shares;
+        uint256 avgPrice;
+    }
 
     /// @notice Registers a new vault
     /// @param vault The address of the vault
@@ -22,6 +28,46 @@ interface IVaultManager {
     /// @notice Gets the configuration of a vault
     function getVaultConfig(address vault) external view returns (VaultConfig memory);
 
+    /// @notice Stakes a specified amount of the underlying asset
+    /// @return shares The amount of shares minted
+    function stake(address vault, address account, address token, uint256 amount, uint256 nonce, bytes memory signature)
+        external
+        returns (uint256 shares);
+
+    /// @notice Unstakes a specified amount of the underlying asset
+    /// @return shares The amount of shares burned
+    /// @return fee The fee amount paid to the fee recipient
+    /// @return feeRecipient The address of the fee recipient
+    function unstake(
+        address vault,
+        address account,
+        address token,
+        uint256 amount,
+        uint256 nonce,
+        bytes memory signature
+    ) external returns (uint256 shares, uint256 fee, address feeRecipient);
+
+    /// @notice Return underlying asset address
+    function asset() external view returns (address);
+
     /// @notice Checks if a vault is registered
     function isRegistered(address vault) external view returns (bool);
+
+    /// @notice Gets the total assets of a vault
+    function getTotalAssets(address vault) external view returns (int256);
+
+    /// @notice Gets the total shares of a vault
+    function getTotalShares(address vault) external view returns (uint256);
+
+    /// @notice Converts assets to shares
+    function convertToShares(address vault, uint256 assets) external view returns (uint256);
+
+    /// @notice Converts shares to assets
+    function convertToAssets(address vault, uint256 shares) external view returns (uint256);
+
+    /// @notice Checks if a stake nonce is used
+    function isStakeNonceUsed(address account, uint256 nonce) external view returns (bool);
+
+    /// @notice Checks if an unstake nonce is used
+    function isUnstakeNonceUsed(address account, uint256 nonce) external view returns (bool);
 }

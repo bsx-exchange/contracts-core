@@ -6,11 +6,13 @@ import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/crypt
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {IBSX1000x} from "../1000x/interfaces/IBSX1000x.sol";
 import {ExchangeStorage} from "./ExchangeStorage.sol";
 import {IExchange, ILiquidation, ISwap} from "./interfaces/IExchange.sol";
+import {IVaultManager} from "./interfaces/IVaultManager.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {BalanceLogic} from "./lib/logic/BalanceLogic.sol";
@@ -74,7 +76,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     modifier notVault(address account) {
         if (access.getVaultManager().isRegistered(account)) {
-            revert Errors.Exchange_Vault_Registered();
+            revert Errors.Exchange_VaultAddress();
         }
         _;
     }
@@ -105,6 +107,8 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         onlyRole(access.GENERAL_ROLE())
     {
         access.getVaultManager().registerVault(vault, feeRecipient, profitShareBps, signature);
+
+        emit RegisterVault(vault, feeRecipient, profitShareBps);
     }
 
     /// @inheritdoc IExchange
@@ -370,6 +374,16 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         return access.getVaultManager().isRegistered(account);
     }
 
+    /// @inheritdoc IExchange
+    function isStakeVaultNonceUsed(address account, uint256 nonce) public view returns (bool) {
+        return access.getVaultManager().isStakeNonceUsed(account, nonce);
+    }
+
+    /// @inheritdoc IExchange
+    function isUnstakeVaultNonceUsed(address account, uint256 nonce) public view returns (bool) {
+        return access.getVaultManager().isUnstakeNonceUsed(account, nonce);
+    }
+
     /// @dev Handles a operation. Will revert if operation type is invalid.
     /// @param data Transaction data to handle
     /// The first byte is operation type
@@ -412,6 +426,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         } else if (operationType == OperationType.Withdraw) {
             Withdraw memory withdrawData = abi.decode(data[5:], (Withdraw));
             _withdraw(withdrawData);
+        } else if (operationType == OperationType.StakeVault) {
+            StakeVaultParams memory stakeVaultData = abi.decode(data[5:], (StakeVaultParams));
+            _stakeVault(stakeVaultData);
+        } else if (operationType == OperationType.UnstakeVault) {
+            UnstakeVaultParams memory unstakeVaultData = abi.decode(data[5:], (UnstakeVaultParams));
+            _unstakeVault(unstakeVaultData);
         } else {
             revert Errors.Exchange_InvalidOperationType();
         }
@@ -451,6 +471,51 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         }
     }
 
+    /// @dev Call to vault manager to stake
+    function _stakeVault(StakeVaultParams memory data) internal {
+        IVaultManager vaultManager = access.getVaultManager();
+        try vaultManager.stake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature) returns (
+            uint256 shares
+        ) {
+            emit StakeVault(
+                data.vault, data.account, data.nonce, data.token, data.amount, shares, VaultActionStatus.Success
+            );
+        } catch {
+            emit StakeVault(data.vault, data.account, data.nonce, data.token, data.amount, 0, VaultActionStatus.Failure);
+        }
+    }
+
+    /// @dev Call to vault manager to unstake
+    function _unstakeVault(UnstakeVaultParams memory data) internal {
+        IVaultManager vaultManager = access.getVaultManager();
+        try vaultManager.unstake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature)
+        returns (uint256 shares, uint256 fee, address feeRecipient) {
+            emit UnstakeVault(
+                data.vault,
+                data.account,
+                data.nonce,
+                data.token,
+                data.amount,
+                shares,
+                fee,
+                feeRecipient,
+                VaultActionStatus.Success
+            );
+        } catch {
+            emit UnstakeVault(
+                data.vault,
+                data.account,
+                data.nonce,
+                data.token,
+                data.amount,
+                0,
+                0,
+                address(0),
+                VaultActionStatus.Failure
+            );
+        }
+    }
+
     function innerTransferToBSX1000(TransferToBSX1000Params memory params)
         external
         internalCall
@@ -459,6 +524,28 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         return BalanceLogic.transferToBSX1000(
             this, IBSX1000x(access.getBsx1000()), BalanceLogic.BalanceEngine(clearingService, spotEngine), params
         );
+    }
+
+    function coverLoss(address account, address payer, address asset) external override returns (uint256) {
+        if (msg.sender != address(access.getVaultManager())) {
+            revert Errors.Unauthorized();
+        }
+
+        int256 loss = balanceOf(account, asset);
+        if (loss >= 0) {
+            revert Errors.Exchange_AccountNoLoss(account, asset);
+        }
+        uint256 coverAmount = SignedMath.abs(loss);
+        int256 payerBalance = balanceOf(payer, asset);
+        if (payerBalance < coverAmount.safeInt256()) {
+            revert Errors.Exchange_AccountInsufficientBalance(payer, asset, payerBalance, coverAmount);
+        }
+
+        clearingService.withdraw(payer, coverAmount, asset);
+        clearingService.deposit(account, coverAmount, asset);
+
+        emit CoverLoss(account, payer, asset, coverAmount);
+        return coverAmount;
     }
 
     /// @dev Validates and authorizes a signer to sign on behalf of a sender.

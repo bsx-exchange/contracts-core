@@ -165,7 +165,13 @@ library Errors {
     error Exchange_Swap_AmountOutTooLittle(uint256 amountOutX18, uint256 minAmountOutX18);
 
     /// @notice Thrown when interacting with vault address
-    error Exchange_Vault_Registered();
+    error Exchange_VaultAddress();
+
+    /// @notice Thrown when account has no loss with a collateral token
+    error Exchange_AccountNoLoss(address account, address token);
+
+    /// @notice Thrown when account has insufficient balance
+    error Exchange_AccountInsufficientBalance(address account, address token, int256 balance, uint256 amount);
 
     /*//////////////////////////////////////////////////////////////////////////
                                     CLEARING SERVICE
@@ -214,6 +220,9 @@ library Errors {
     /// @notice Thrown when vault is already registered
     error Vault_AlreadyRegistered(address vault);
 
+    /// @notice Thrown when vault is not registered
+    error Vault_NotRegistered(address vault);
+
     /// @notice Thrown when vault address is invalid
     error Vault_InvalidVaultAddress(address vault);
 
@@ -223,6 +232,27 @@ library Errors {
     /// @notice Thrown when profit share basis points is invalid
     error Vault_InvalidProfitShareBps(address vault, uint256 profitShareBps);
 
+    /// @notice Thrown when token is not the same as asset in vault
+    error Vault_InvalidToken(address token, address asset);
+
     /// @notice Thrown when registering vault with not zero balance
     error Vault_NotZeroBalance(address vault, address token, int256 balance);
+
+    /// @notice Thrown when vault is negative balance
+    error Vault_NegativeBalance();
+
+    /// @notice Thrown when stake nonce is used
+    error Vault_Stake_UsedNonce(address account, uint256 nonce);
+
+    /// @notice Thrown when unstake nonce is used
+    error Vault_Unstake_UsedNonce(address account, uint256 nonce);
+
+    /// @notice Thrown when stake amount exceeds current balance
+    error Vault_Stake_InsufficientBalance(address account, int256 balance, uint256 requestAmount);
+
+    /// @notice Thrown when unstake amount exceeds current shares
+    error Vault_Unstake_InsufficientShares(address account, uint256 shares, uint256 requestShares);
+
+    /// @notice Thrown when vault has insufficient assets to cover loss
+    error Vault_CoverLoss_InsufficientAmount(address vault, address account, uint256 expectedAmount, uint256 amount);
 }

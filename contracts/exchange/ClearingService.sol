@@ -27,7 +27,10 @@ contract ClearingService is IClearingService, Initializable {
     // }
 
     modifier onlySequencer() {
-        if (msg.sender != address(access.getExchange()) && msg.sender != address(access.getOrderBook())) {
+        if (
+            msg.sender != address(access.getExchange()) && msg.sender != address(access.getOrderBook())
+                && msg.sender != address(access.getVaultManager())
+        ) {
             revert Errors.Unauthorized();
         }
         _;

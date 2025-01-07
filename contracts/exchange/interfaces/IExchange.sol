@@ -110,7 +110,42 @@ interface IExchange is ILiquidation, ISwap {
     /// @notice deprecated, use `WithdrawFailed` instead
     event WithdrawRejected(address sender, uint64 nonce, uint128 withdrawAmount, int256 spotBalance);
 
+    /// @notice Emitted when account is covered loss by another account
+    event CoverLoss(address indexed lostAccount, address indexed payer, address indexed asset, uint256 coverAmount);
+
+    /// @notice Emitted when a new vault is registered
+    event RegisterVault(address indexed vault, address indexed feeRecipient, uint256 profitShareBps);
+
+    /// @notice Emitted then user stakes to vault
+    event StakeVault(
+        address indexed vault,
+        address indexed account,
+        uint256 indexed nonce,
+        address token,
+        uint256 amount,
+        uint256 shares,
+        VaultActionStatus status
+    );
+
+    /// @notice Emitted then user unstakes from vault
+    event UnstakeVault(
+        address indexed vault,
+        address indexed account,
+        uint256 indexed nonce,
+        address token,
+        uint256 amount,
+        uint256 shares,
+        uint256 fee,
+        address feeRecipient,
+        VaultActionStatus status
+    );
+
     enum TransferToBSX1000Status {
+        Success,
+        Failure
+    }
+
+    enum VaultActionStatus {
         Success,
         Failure
     }
@@ -132,7 +167,9 @@ interface IExchange is ILiquidation, ISwap {
         AddSigningWallet,
         _ClaimSequencerFees, // deprecated
         Withdraw,
-        TransferToBSX1000
+        TransferToBSX1000,
+        StakeVault,
+        UnstakeVault
     }
 
     /// @notice Authorizes a wallet to sign on behalf of the sender
@@ -164,6 +201,24 @@ interface IExchange is ILiquidation, ISwap {
         uint128 withdrawalSequencerFee;
     }
 
+    struct StakeVaultParams {
+        address vault;
+        address account;
+        address token;
+        uint256 amount;
+        uint256 nonce;
+        bytes signature;
+    }
+
+    struct UnstakeVaultParams {
+        address vault;
+        address account;
+        address token;
+        uint256 amount;
+        uint256 nonce;
+        bytes signature;
+    }
+
     /// @notice Adds the supported token. Only admin can call this function
     /// @dev Emits a {SupportedTokenAdded} event
     /// @param token Token address
@@ -173,6 +228,14 @@ interface IExchange is ILiquidation, ISwap {
     /// @dev Emits a {SupportedTokenRemoved} event
     /// @param token Token address
     function removeSupportedToken(address token) external;
+
+    /// @notice Covers the loss of account
+    /// @dev Emits a {CoverLoss} event
+    /// @param account Account with loss
+    /// @param payer Payer address
+    /// @param asset Asset address
+    /// @return Cover amount
+    function coverLoss(address account, address payer, address asset) external returns (uint256);
 
     /// @notice Registers account as a vault
     /// @param vault Vault address
@@ -290,4 +353,10 @@ interface IExchange is ILiquidation, ISwap {
 
     /// @dev Checks whether the account is a vault or not
     function isVault(address account) external view returns (bool);
+
+    /// @notice Checks whether the nonce is used for staking to vault or not
+    function isStakeVaultNonceUsed(address account, uint256 nonce) external view returns (bool);
+
+    /// @notice Checks whether the nonce is used for unstaking from vault or not
+    function isUnstakeVaultNonceUsed(address account, uint256 nonce) external view returns (bool);
 }

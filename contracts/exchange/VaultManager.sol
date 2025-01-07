@@ -2,6 +2,9 @@
 pragma solidity ^0.8.25;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
+import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 
 import {Access} from "./access/Access.sol";
 import {IExchange} from "./interfaces/IExchange.sol";
@@ -11,18 +14,39 @@ import {Errors} from "./lib/Errors.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
 
 contract VaultManager is IVaultManager, Initializable {
+    using Math for uint256;
+    using SafeCast for int256;
+    using SafeCast for uint256;
+    using SignedMath for int256;
+
+    uint256 private constant BASIS_POINT_SCALE = 1e4;
+    uint256 private constant PRICE_SCALE = 1e18;
+    uint256 private constant MAX_PROFIT_SHARE_BPS = 10_000; // 100%
+
     bytes32 public constant REGISTER_VAULT_TYPEHASH =
         keccak256("RegisterVault(address vault,address feeRecipient,uint256 profitShareBps)");
-    uint256 private constant MAX_PROFIT_SHARE_BPS = 10_000; // 100%
+    bytes32 public constant STAKE_VAULT_TYPEHASH =
+        keccak256("StakeVault(address vault,address account,address token,uint256 amount,uint256 nonce)");
+    bytes32 public constant UNSTAKE_VAULT_TYPEHASH =
+        keccak256("UnstakeVault(address vault,address account,address token,uint256 amount,uint256 nonce)");
 
     Access public access;
     address public asset;
 
     mapping(address vault => VaultConfig config) private _vaultConfig;
     mapping(address feeRecipient => bool isRegistered) private _feeRecipients;
+    mapping(address vault => VaultData data) private _vaults;
+    mapping(address vault => mapping(address account => StakerData data)) private _stakers;
+    mapping(address account => mapping(uint256 nonce => bool used)) public isStakeNonceUsed;
+    mapping(address account => mapping(uint256 nonce => bool used)) public isUnstakeNonceUsed;
 
     modifier onlyExchange() {
         if (msg.sender != address(access.getExchange())) revert Errors.Unauthorized();
+        _;
+    }
+
+    modifier isVault(address vault) {
+        if (!isRegistered(vault)) revert Errors.Vault_NotRegistered(vault);
         _;
     }
 
@@ -72,8 +96,144 @@ contract VaultManager is IVaultManager, Initializable {
         _vaultConfig[vault] =
             VaultConfig({profitShareBps: profitShareBps, feeRecipient: feeRecipient, isRegistered: true});
         _feeRecipients[feeRecipient] = true;
+    }
 
-        emit RegisterVault(vault, feeRecipient, profitShareBps);
+    /// @inheritdoc IVaultManager
+    function stake(address vault, address account, address token, uint256 amount, uint256 nonce, bytes memory signature)
+        external
+        onlyExchange
+        isVault(vault)
+        returns (uint256)
+    {
+        if (token != asset) {
+            revert Errors.Vault_InvalidToken(token, asset);
+        }
+        if (isStakeNonceUsed[account][nonce]) {
+            revert Errors.Vault_Stake_UsedNonce(account, nonce);
+        }
+        isStakeNonceUsed[account][nonce] = true;
+
+        // validate signature
+        IExchange exchange = access.getExchange();
+        bytes32 stakeHash =
+            exchange.hashTypedDataV4(keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, account, token, amount, nonce)));
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(account, stakeHash, signature)) {
+            revert Errors.InvalidSignature(account);
+        }
+
+        // withdraw from clearing service
+        int256 currentBalance = exchange.balanceOf(account, asset);
+        if (amount.toInt256() > currentBalance) {
+            revert Errors.Vault_Stake_InsufficientBalance(account, currentBalance, amount);
+        }
+
+        amount = _coverVaultLoss(vault, account, amount);
+
+        VaultData storage vaultData = _vaults[vault];
+        StakerData storage staker = _stakers[vault][account];
+
+        uint256 shares = convertToShares(vault, amount);
+        uint256 currentShares = staker.shares;
+        // avgPrice = (currentShares * avgPrice + shares * currentPrice) / (currentShares + shares)
+        staker.avgPrice = (currentShares * staker.avgPrice + amount).mulDiv(PRICE_SCALE, currentShares + shares);
+        staker.shares = currentShares + shares;
+
+        vaultData.totalShares += shares;
+
+        access.getClearingService().withdraw(account, amount, asset);
+        access.getClearingService().deposit(vault, amount, asset);
+
+        return shares;
+    }
+
+    /// @inheritdoc IVaultManager
+    function unstake(
+        address vault,
+        address account,
+        address token,
+        uint256 amount,
+        uint256 nonce,
+        bytes memory signature
+    ) external onlyExchange isVault(vault) returns (uint256 shares, uint256 fee, address feeRecipient) {
+        if (token != asset) {
+            revert Errors.Vault_InvalidToken(token, asset);
+        }
+        if (isUnstakeNonceUsed[account][nonce]) {
+            revert Errors.Vault_Unstake_UsedNonce(account, nonce);
+        }
+        isUnstakeNonceUsed[account][nonce] = true;
+
+        // validate signature
+        IExchange exchange = access.getExchange();
+        bytes32 unstakeHash = exchange.hashTypedDataV4(
+            keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, account, token, amount, nonce))
+        );
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(account, unstakeHash, signature)) {
+            revert Errors.InvalidSignature(account);
+        }
+
+        VaultConfig memory vaultConfig = getVaultConfig(vault);
+        VaultData storage vaultData = _vaults[vault];
+        StakerData storage staker = _stakers[vault][account];
+
+        shares = convertToShares(vault, amount);
+        if (shares > staker.shares) {
+            revert Errors.Vault_Unstake_InsufficientShares(account, staker.shares, shares);
+        }
+        uint256 currentPrice = amount.mulDiv(PRICE_SCALE, shares);
+        uint256 avgPrice = staker.avgPrice;
+        if (currentPrice > avgPrice) {
+            uint256 profit = shares.mulDiv(currentPrice - avgPrice, PRICE_SCALE);
+            feeRecipient = vaultConfig.feeRecipient;
+            fee = profit.mulDiv(vaultConfig.profitShareBps, BASIS_POINT_SCALE);
+            access.getClearingService().deposit(feeRecipient, fee, asset);
+        }
+
+        staker.shares -= shares;
+        vaultData.totalShares -= shares;
+
+        access.getClearingService().deposit(account, amount - fee, asset);
+        access.getClearingService().withdraw(vault, amount, asset);
+    }
+
+    /// @inheritdoc IVaultManager
+    function convertToShares(address vault, uint256 assets) public view virtual returns (uint256) {
+        int256 totalAssets = getTotalAssets(vault);
+        uint256 totalShares = getTotalShares(vault);
+
+        if (totalAssets < 0) {
+            revert Errors.Vault_NegativeBalance();
+        }
+        return assets.mulDiv(totalShares + 1, totalAssets.toUint256() + 1);
+    }
+
+    /// @inheritdoc IVaultManager
+    function convertToAssets(address vault, uint256 shares) public view virtual returns (uint256) {
+        int256 totalAssets = getTotalAssets(vault);
+        uint256 totalShares = getTotalShares(vault);
+
+        if (totalAssets < 0) {
+            return 0;
+        }
+        return shares.mulDiv(totalAssets.toUint256() + 1, totalShares + 1);
+    }
+
+    /// @inheritdoc IVaultManager
+    function getTotalAssets(address vault) public view returns (int256) {
+        return access.getExchange().balanceOf(vault, asset);
+    }
+
+    /// @inheritdoc IVaultManager
+    function getTotalShares(address vault) public view returns (uint256) {
+        return _vaults[vault].totalShares;
+    }
+
+    function getStakerData(address vault, address account) public view returns (StakerData memory) {
+        return _stakers[vault][account];
+    }
+
+    function getVaultData(address vault) public view returns (VaultData memory) {
+        return _vaults[vault];
     }
 
     /// @inheritdoc IVaultManager
@@ -84,5 +244,20 @@ contract VaultManager is IVaultManager, Initializable {
     /// @inheritdoc IVaultManager
     function isRegistered(address vault) public view override returns (bool) {
         return _vaultConfig[vault].isRegistered;
+    }
+
+    /// @dev If the total assets of a vault are negative, staker will need to cover the loss first
+    function _coverVaultLoss(address vault, address account, uint256 amount) private returns (uint256) {
+        int256 totalAssets = getTotalAssets(vault);
+        if (totalAssets >= 0) {
+            return amount;
+        }
+
+        uint256 coverAmount = access.getExchange().coverLoss(vault, account, asset);
+        if (amount < coverAmount) {
+            revert Errors.Vault_CoverLoss_InsufficientAmount(vault, account, coverAmount, amount);
+        }
+
+        return amount - coverAmount;
     }
 }

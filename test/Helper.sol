@@ -3,11 +3,10 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {IERC5267} from "@openzeppelin/contracts/interfaces/IERC5267.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
-import {StdUtils} from "forge-std/StdUtils.sol";
 import {VmSafe} from "forge-std/Vm.sol";
 
 library Helper {
-    VmSafe private constant vm = VmSafe(address(uint160(uint256(keccak256("hevm cheat code")))));
+    VmSafe private constant VM = VmSafe(address(uint160(uint256(keccak256("hevm cheat code")))));
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
 
@@ -41,7 +40,7 @@ library Helper {
             abi.encode(TYPE_HASH, keccak256(bytes(name)), keccak256(bytes(version)), chainId, verifyingContract)
         );
         bytes32 digest = MessageHashUtils.toTypedDataHash(domainSeparator, structHash);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
+        (uint8 v, bytes32 r, bytes32 s) = VM.sign(privateKey, digest);
         signature = abi.encodePacked(r, s, v);
     }
 }
