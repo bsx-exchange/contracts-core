@@ -128,7 +128,7 @@ library SwapLogic {
         }
 
         // withdraw tokenIn
-        engines.clearingService.withdraw(params.account, params.amountIn, params.assetIn, engines.spotEngine);
+        engines.clearingService.withdraw(params.account, params.amountIn, params.assetIn);
 
         // check amountOut
         uint256 totalTokenOutAfter = IERC20(params.assetOut).balanceOf(address(this));
@@ -139,7 +139,7 @@ library SwapLogic {
         }
 
         // deposit tokenOut
-        engines.clearingService.deposit(params.account, amountOutX18, params.assetOut, engines.spotEngine);
+        engines.clearingService.deposit(params.account, amountOutX18, params.assetOut);
 
         // disapprove tokenIn
         IERC20(params.assetIn).forceApprove(address(engines.universalRouter), 0);

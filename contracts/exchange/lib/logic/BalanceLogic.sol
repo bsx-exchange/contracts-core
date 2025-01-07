@@ -41,7 +41,7 @@ library BalanceLogic {
             IERC20(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
         }
 
-        engine.clearingService.deposit(recipient, amount, token, engine.spot);
+        engine.clearingService.deposit(recipient, amount, token);
         emit IExchange.Deposit(token, recipient, amount, 0);
     }
 
@@ -64,7 +64,7 @@ library BalanceLogic {
             depositor, address(this), amountToTransfer, validAfter, validBefore, nonce, signature
         );
 
-        engine.clearingService.deposit(depositor, roundDownAmount, token, engine.spot);
+        engine.clearingService.deposit(depositor, roundDownAmount, token);
         emit IExchange.Deposit(token, depositor, roundDownAmount, 0);
     }
 
@@ -86,7 +86,7 @@ library BalanceLogic {
             return;
         }
 
-        engine.clearingService.withdraw(data.sender, data.amount, mappedToken, engine.spot);
+        engine.clearingService.withdraw(data.sender, data.amount, mappedToken);
         _collectedFee[mappedToken] += data.withdrawalSequencerFee;
 
         uint256 netAmount = data.amount - data.withdrawalSequencerFee;
@@ -122,7 +122,7 @@ library BalanceLogic {
         if (currentBalance < amount.safeInt256()) {
             revert Errors.Exchange_TransferToBSX1000_InsufficientBalance(account, currentBalance, amount);
         }
-        engine.clearingService.withdraw(account, amount, token, engine.spot);
+        engine.clearingService.withdraw(account, amount, token);
 
         IERC20(token).forceApprove(address(bsx1000), amountToTransfer);
         bsx1000.deposit(account, amount);

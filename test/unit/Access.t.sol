@@ -78,7 +78,7 @@ contract AccessTest is Test {
 
         address exchange = makeAddr("exchange");
         access.setExchange(exchange);
-        assertEq(exchange, access.getExchange());
+        assertEq(exchange, address(access.getExchange()));
     }
 
     function test_setExchange_revertsIfSetZeroAddr() public {
@@ -100,7 +100,7 @@ contract AccessTest is Test {
 
         address clearinghouse = makeAddr("clearinghouse");
         access.setClearingService(clearinghouse);
-        assertEq(clearinghouse, access.getClearingService());
+        assertEq(clearinghouse, address(access.getClearingService()));
     }
 
     function test_setClearingService_revertsIfSetZeroAddr() public {
@@ -122,7 +122,7 @@ contract AccessTest is Test {
 
         address orderbook = makeAddr("orderbook");
         access.setOrderBook(orderbook);
-        assertEq(orderbook, access.getOrderBook());
+        assertEq(orderbook, address(access.getOrderBook()));
     }
 
     function test_setOrderBook_revertsIfSetZeroAddr() public {
@@ -144,7 +144,7 @@ contract AccessTest is Test {
 
         address spotEngine = makeAddr("spotEngine");
         access.setSpotEngine(spotEngine);
-        assertEq(spotEngine, access.getSpotEngine());
+        assertEq(spotEngine, address(access.getSpotEngine()));
     }
 
     function test_setSpotEngine_revertsIfSetZeroAddr() public {
@@ -166,7 +166,7 @@ contract AccessTest is Test {
 
         address perpEngine = makeAddr("perpEngine");
         access.setPerpEngine(perpEngine);
-        assertEq(perpEngine, access.getPerpEngine());
+        assertEq(perpEngine, address(access.getPerpEngine()));
     }
 
     function test_setPerpEngine_revertsIfSetZeroAddr() public {
@@ -188,7 +188,7 @@ contract AccessTest is Test {
 
         address bsx1000 = makeAddr("bsx1000");
         access.setBsx1000(bsx1000);
-        assertEq(bsx1000, access.getBsx1000());
+        assertEq(bsx1000, address(access.getBsx1000()));
     }
 
     function test_setBsx1000_revertsIfSetZeroAddr() public {

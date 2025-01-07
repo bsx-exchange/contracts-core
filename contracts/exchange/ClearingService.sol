@@ -27,14 +27,15 @@ contract ClearingService is IClearingService, Initializable {
     // }
 
     modifier onlySequencer() {
-        if (msg.sender != access.getExchange() && msg.sender != access.getOrderBook()) {
+        if (msg.sender != address(access.getExchange()) && msg.sender != address(access.getOrderBook())) {
             revert Errors.Unauthorized();
         }
         _;
     }
 
     /// @inheritdoc IClearingService
-    function deposit(address account, uint256 amount, address token, ISpot spotEngine) external onlySequencer {
+    function deposit(address account, uint256 amount, address token) external onlySequencer {
+        ISpot spotEngine = access.getSpotEngine();
         ISpot.AccountDelta[] memory productDelta = new ISpot.AccountDelta[](1);
         productDelta[0] = ISpot.AccountDelta(token, account, amount.safeInt256());
         spotEngine.modifyAccount(productDelta);
@@ -42,7 +43,8 @@ contract ClearingService is IClearingService, Initializable {
     }
 
     /// @inheritdoc IClearingService
-    function withdraw(address account, uint256 amount, address token, ISpot spotEngine) external onlySequencer {
+    function withdraw(address account, uint256 amount, address token) external onlySequencer {
+        ISpot spotEngine = access.getSpotEngine();
         ISpot.AccountDelta[] memory productDelta = new ISpot.AccountDelta[](1);
         productDelta[0] = ISpot.AccountDelta(token, account, -amount.safeInt256());
         spotEngine.modifyAccount(productDelta);

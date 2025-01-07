@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
-import {ISpot} from "./ISpot.sol";
-
 /// @title Clearing service interface
 /// @notice Manage insurance fund and spot balance
 interface IClearingService {
@@ -13,15 +11,13 @@ interface IClearingService {
     /// @param account Account address
     /// @param amount Amount of token
     /// @param token Token address
-    /// @param spotEngine Spot engine address
-    function deposit(address account, uint256 amount, address token, ISpot spotEngine) external;
+    function deposit(address account, uint256 amount, address token) external;
 
     /// @notice Withdraws token from spot account
     /// @param account Account address
     /// @param amount Amount of token
     /// @param token Token address
-    /// @param spotEngine Spot engine address
-    function withdraw(address account, uint256 amount, address token, ISpot spotEngine) external;
+    function withdraw(address account, uint256 amount, address token) external;
 
     /// @notice Deposits token to insurance fund
     /// @param amount Amount of token

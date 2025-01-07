@@ -25,8 +25,8 @@ contract Perp is IPerp, Initializable {
 
     modifier onlySequencer() {
         if (
-            msg.sender != access.getExchange() && msg.sender != access.getClearingService()
-                && msg.sender != access.getOrderBook()
+            msg.sender != address(access.getExchange()) && msg.sender != address(access.getClearingService())
+                && msg.sender != address(access.getOrderBook())
         ) {
             revert Errors.Unauthorized();
         }

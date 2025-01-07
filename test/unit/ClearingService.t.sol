@@ -49,31 +49,31 @@ contract ClearingServiceTest is Test {
         vm.startPrank(exchange);
 
         uint256 amount = 100;
-        clearingService.deposit(account, amount, token, spotEngine);
+        clearingService.deposit(account, amount, token);
         assertEq(spotEngine.getBalance(token, account), int256(amount));
         assertEq(spotEngine.getTotalBalance(token), amount);
     }
 
     function test_deposit_revertsWhenUnauthorized() public {
         vm.expectRevert(Errors.Unauthorized.selector);
-        clearingService.deposit(account, 10, token, spotEngine);
+        clearingService.deposit(account, 10, token);
     }
 
     function test_withdraw() public {
         vm.startPrank(exchange);
 
         uint256 amount = 100;
-        clearingService.deposit(account, amount, token, spotEngine);
+        clearingService.deposit(account, amount, token);
         assertEq(spotEngine.getBalance(token, account), int256(amount));
         assertEq(spotEngine.getTotalBalance(token), amount);
 
-        clearingService.withdraw(account, amount, token, spotEngine);
+        clearingService.withdraw(account, amount, token);
         assertEq(spotEngine.getBalance(token, account), int256(0));
     }
 
     function test_withdraw_revertsWhenUnauthorized() public {
         vm.expectRevert(Errors.Unauthorized.selector);
-        clearingService.withdraw(account, 10, token, spotEngine);
+        clearingService.withdraw(account, 10, token);
     }
 
     function test_depositInsuranceFund() public {

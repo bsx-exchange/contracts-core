@@ -5,6 +5,12 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import {IBSX1000x} from "../../1000x/interfaces/IBSX1000x.sol";
+import {IClearingService} from "../interfaces/IClearingService.sol";
+import {IExchange} from "../interfaces/IExchange.sol";
+import {IOrderBook} from "../interfaces/IOrderBook.sol";
+import {IPerp} from "../interfaces/IPerp.sol";
+import {ISpot} from "../interfaces/ISpot.sol";
 import {Errors} from "../lib/Errors.sol";
 
 /// @title Access contract
@@ -20,12 +26,12 @@ contract Access is Initializable, AccessControlUpgradeable {
     bytes32 public constant SIGNER_OPERATOR_ROLE = keccak256("SIGNER_OPERATOR_ROLE");
     bytes32 public constant COLLATERAL_OPERATOR_ROLE = keccak256("COLLATERAL_OPERATOR_ROLE");
 
-    address private exchange;
-    address private clearingService;
-    address private orderBook;
-    address private spot;
-    address private perp;
-    address private bsx1000;
+    IExchange private exchange;
+    IClearingService private clearingService;
+    IOrderBook private orderBook;
+    ISpot private spot;
+    IPerp private perp;
+    IBSX1000x private bsx1000;
 
     mapping(bytes32 role => EnumerableSet.AddressSet accounts) private roles;
 
@@ -60,65 +66,65 @@ contract Access is Initializable, AccessControlUpgradeable {
         if (_exchange == address(0)) {
             revert Errors.ZeroAddress();
         }
-        exchange = _exchange;
+        exchange = IExchange(_exchange);
     }
 
     function setClearingService(address _clearingService) external onlyRole(ADMIN_ROLE) {
         if (_clearingService == address(0)) {
             revert Errors.ZeroAddress();
         }
-        clearingService = _clearingService;
+        clearingService = IClearingService(_clearingService);
     }
 
     function setOrderBook(address _orderBook) external onlyRole(ADMIN_ROLE) {
         if (_orderBook == address(0)) {
             revert Errors.ZeroAddress();
         }
-        orderBook = _orderBook;
+        orderBook = IOrderBook(_orderBook);
     }
 
     function setPerpEngine(address _perp) external onlyRole(ADMIN_ROLE) {
         if (_perp == address(0)) {
             revert Errors.ZeroAddress();
         }
-        perp = _perp;
+        perp = IPerp(_perp);
     }
 
     function setSpotEngine(address _spot) external onlyRole(ADMIN_ROLE) {
         if (_spot == address(0)) {
             revert Errors.ZeroAddress();
         }
-        spot = _spot;
+        spot = ISpot(_spot);
     }
 
     function setBsx1000(address _bsx1000) external onlyRole(ADMIN_ROLE) {
         if (_bsx1000 == address(0)) {
             revert Errors.ZeroAddress();
         }
-        bsx1000 = _bsx1000;
+        bsx1000 = IBSX1000x(_bsx1000);
     }
 
-    function getExchange() external view returns (address) {
+    function getExchange() external view returns (IExchange) {
         return exchange;
     }
 
-    function getClearingService() external view returns (address) {
+    function getClearingService() external view returns (IClearingService) {
         return clearingService;
     }
 
-    function getOrderBook() external view returns (address) {
+    function getOrderBook() external view returns (IOrderBook) {
         return orderBook;
     }
 
-    function getSpotEngine() external view returns (address) {
+    function getSpotEngine() external view returns (ISpot) {
         return spot;
     }
 
-    function getPerpEngine() external view returns (address) {
+    function getPerpEngine() external view returns (IPerp) {
         return perp;
     }
 
-    function getBsx1000() external view returns (address) {
+    function getBsx1000() external view returns (IBSX1000x) {
         return bsx1000;
     }
 

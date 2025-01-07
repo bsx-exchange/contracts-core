@@ -58,7 +58,7 @@ contract OrderBook is IOrderBook, Initializable {
     // }
 
     modifier onlySequencer() {
-        if (msg.sender != access.getExchange()) {
+        if (msg.sender != address(access.getExchange())) {
             revert Errors.Unauthorized();
         }
         _;

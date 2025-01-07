@@ -210,7 +210,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         uint256 newBalance = accountBalance - amount;
         _balance[account].available = newBalance;
 
-        IExchange exchange = IExchange(access.getExchange());
+        IExchange exchange = access.getExchange();
         token.forceApprove(address(exchange), amountToTransfer);
         exchange.deposit(account, address(token), amount.safeUInt128());
 

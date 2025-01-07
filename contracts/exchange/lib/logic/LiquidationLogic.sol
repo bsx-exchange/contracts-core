@@ -117,7 +117,7 @@ library LiquidationLogic {
                     );
                 }
                 // withdraw tokenIn
-                engines.clearingService.withdraw(account, amountInX18, liquidationAsset, engines.spotEngine);
+                engines.clearingService.withdraw(account, amountInX18, liquidationAsset);
 
                 // calculate amountOut
                 uint256 totalTokenOutAfter = IERC20(underlyingAsset).balanceOf(address(this));
@@ -129,7 +129,7 @@ library LiquidationLogic {
 
                 // deposit tokenOut
                 engines.clearingService.depositInsuranceFund(feeX18);
-                engines.clearingService.deposit(account, netAmountOutX18, underlyingAsset, engines.spotEngine);
+                engines.clearingService.deposit(account, netAmountOutX18, underlyingAsset);
 
                 emit ILiquidation.LiquidateCollateral(
                     account,
