@@ -178,13 +178,29 @@ interface IBSX1000x {
     /// @param productId The product ID
     /// @param account The account address
     /// @param nonce The nonce of the order
+    /// @param margin The margin of the order
+    /// @param leverage The leverage of the order
+    /// @param price The price of the order
+    /// @param size The size of the order, positive for long, negative for short
     /// @param fee The fee of the order
-    event OpenPosition(uint32 indexed productId, address indexed account, uint256 indexed nonce, int256 fee);
+    /// @param credit The discount for the order margin
+    event OpenPosition(
+        uint32 indexed productId,
+        address indexed account,
+        uint256 indexed nonce,
+        uint128 margin,
+        uint128 leverage,
+        uint128 price,
+        int128 size,
+        int256 fee,
+        uint256 credit
+    );
 
     /// @dev Emitted when a position is closed
     /// @param productId The product ID
     /// @param account The account address
     /// @param nonce The nonce of the openning order
+    /// @param realizedPnl The final profit or loss of the order
     /// @param pnl The profit or loss of the order
     /// @param fee The fee of the order
     /// @param reason The reason for closing the position
@@ -192,6 +208,7 @@ interface IBSX1000x {
         uint32 indexed productId,
         address indexed account,
         uint256 indexed nonce,
+        int256 realizedPnl,
         int256 pnl,
         int256 fee,
         ClosePositionReason reason

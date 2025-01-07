@@ -870,7 +870,17 @@ contract BSX1000xTest is Test {
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, signature);
 
         uint256 fundBalanceAfter = bsx1000x.generalFund();
@@ -926,7 +936,17 @@ contract BSX1000xTest is Test {
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, signature);
 
         uint256 fundBalanceAfter = bsx1000x.generalFund();
@@ -1245,7 +1265,17 @@ contract BSX1000xTest is Test {
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            credit
+        );
         bsx1000x.openPosition(order, credit, signature);
 
         uint256 fundBalanceAfter = bsx1000x.generalFund();
@@ -1302,7 +1332,17 @@ contract BSX1000xTest is Test {
         bytes memory signature = _signOpenOrder(signerKey, order);
 
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            credit
+        );
         bsx1000x.openPosition(order, credit, signature);
 
         uint256 fundBalanceAfter = bsx1000x.generalFund();
@@ -1383,7 +1423,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // close position
@@ -1396,9 +1446,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.Normal
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.Normal
         );
         bsx1000x.closePosition(
             order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
@@ -1457,7 +1514,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // close position
@@ -1470,9 +1537,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.Normal
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.Normal
         );
         bsx1000x.closePosition(
             order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
@@ -1533,7 +1607,17 @@ contract BSX1000xTest is Test {
         {
             bytes memory openSignature = _signOpenOrder(signerKey, order);
             vm.expectEmit();
-            emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+            emit IBSX1000x.OpenPosition(
+                order.productId,
+                order.account,
+                order.nonce,
+                order.margin,
+                order.leverage,
+                order.price,
+                order.size,
+                order.fee,
+                credit
+            );
             bsx1000x.openPosition(order, credit, openSignature);
         }
 
@@ -1547,9 +1631,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.Normal
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.Normal
         );
         bsx1000x.closePosition(
             order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
@@ -1610,7 +1701,17 @@ contract BSX1000xTest is Test {
         {
             bytes memory openSignature = _signOpenOrder(signerKey, order);
             vm.expectEmit();
-            emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+            emit IBSX1000x.OpenPosition(
+                order.productId,
+                order.account,
+                order.nonce,
+                order.margin,
+                order.leverage,
+                order.price,
+                order.size,
+                order.fee,
+                credit
+            );
             bsx1000x.openPosition(order, credit, openSignature);
         }
 
@@ -1624,9 +1725,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.Normal
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.Normal
         );
         bsx1000x.closePosition(
             order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
@@ -1886,7 +1994,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // fee is greater than margin
@@ -1973,7 +2091,17 @@ contract BSX1000xTest is Test {
         {
             bytes memory openSignature = _signOpenOrder(signerKey, order);
             vm.expectEmit();
-            emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+            emit IBSX1000x.OpenPosition(
+                order.productId,
+                order.account,
+                order.nonce,
+                order.margin,
+                order.leverage,
+                order.price,
+                order.size,
+                order.fee,
+                credit
+            );
             bsx1000x.openPosition(order, credit, openSignature);
         }
 
@@ -1985,9 +2113,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.TakeProfit
         );
         bsx1000x.forceClosePosition(
             order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
@@ -2048,7 +2183,17 @@ contract BSX1000xTest is Test {
         {
             bytes memory openSignature = _signOpenOrder(signerKey, order);
             vm.expectEmit();
-            emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+            emit IBSX1000x.OpenPosition(
+                order.productId,
+                order.account,
+                order.nonce,
+                order.margin,
+                order.leverage,
+                order.price,
+                order.size,
+                order.fee,
+                credit
+            );
             bsx1000x.openPosition(order, credit, openSignature);
         }
 
@@ -2060,11 +2205,13 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee + int256(credit);
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
             order.productId,
             order.account,
             order.nonce,
+            realizedPnl,
             pnl,
             closePositionFee,
             IBSX1000x.ClosePositionReason.Liquidation
@@ -2129,7 +2276,17 @@ contract BSX1000xTest is Test {
         order.fee = 2e18;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // force close position
@@ -2140,9 +2297,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.TakeProfit
         );
         bsx1000x.forceClosePosition(
             order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
@@ -2201,7 +2365,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e18;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // force close position
@@ -2212,9 +2386,16 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.TakeProfit
         );
         bsx1000x.forceClosePosition(
             order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
@@ -2273,7 +2454,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e18;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // force close position
@@ -2284,11 +2475,13 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
             order.productId,
             order.account,
             order.nonce,
+            realizedPnl,
             pnl,
             closePositionFee,
             IBSX1000x.ClosePositionReason.Liquidation
@@ -2355,7 +2548,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e18;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // force close position
@@ -2366,11 +2569,13 @@ contract BSX1000xTest is Test {
         uint256 fundBalanceBefore = bsx1000x.generalFund();
         uint256 lockedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
             order.productId,
             order.account,
             order.nonce,
+            realizedPnl,
             pnl,
             closePositionFee,
             IBSX1000x.ClosePositionReason.Liquidation
@@ -2533,7 +2738,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // profit is negative
@@ -2599,7 +2814,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // fee is greater than margin
@@ -2651,7 +2876,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // close position
@@ -2665,9 +2900,16 @@ contract BSX1000xTest is Test {
         (, uint256 isolatedFundBefore) = bsx1000x.getIsolatedFund(isolatedProductId);
         uint256 lockedIsolatedFundBefore = bsx1000x.lockedFund();
 
+        int256 realizedPnl = pnl - closePositionFee;
         vm.expectEmit();
         emit IBSX1000x.ClosePosition(
-            order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.Normal
+            order.productId,
+            order.account,
+            order.nonce,
+            realizedPnl,
+            pnl,
+            closePositionFee,
+            IBSX1000x.ClosePositionReason.Normal
         );
         bsx1000x.closePosition(
             order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
@@ -2732,7 +2974,17 @@ contract BSX1000xTest is Test {
         order.fee = 1e16;
         bytes memory openSignature = _signOpenOrder(signerKey, order);
         vm.expectEmit();
-        emit IBSX1000x.OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit IBSX1000x.OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            0
+        );
         bsx1000x.openPosition(order, openSignature);
 
         // withdraw all fund

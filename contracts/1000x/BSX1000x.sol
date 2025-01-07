@@ -301,7 +301,17 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         position.takeProfitPrice = order.takeProfitPrice;
         position.liquidationPrice = order.liquidationPrice;
 
-        emit OpenPosition(order.productId, order.account, order.nonce, order.fee);
+        emit OpenPosition(
+            order.productId,
+            order.account,
+            order.nonce,
+            order.margin,
+            order.leverage,
+            order.price,
+            order.size,
+            order.fee,
+            credit
+        );
     }
 
     /// @inheritdoc IBSX1000x
@@ -348,9 +358,9 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         // update balance
         _unlockMargin(account, nonce, position.margin);
         _unlockFund(productId, position.margin * lockFactor);
-        _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
+        int256 realizedPnl = _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
 
-        emit ClosePosition(productId, account, nonce, pnl, fee, ClosePositionReason.Normal);
+        emit ClosePosition(productId, account, nonce, realizedPnl, pnl, fee, ClosePositionReason.Normal);
     }
 
     /// @inheritdoc IBSX1000x
@@ -393,9 +403,9 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         // update balance
         _unlockMargin(account, nonce, position.margin);
         _unlockFund(productId, position.margin * lockFactor);
-        _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
+        int256 realizedPnl = _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
 
-        emit ClosePosition(productId, account, nonce, pnl, fee, reason);
+        emit ClosePosition(productId, account, nonce, realizedPnl, pnl, fee, reason);
     }
 
     /// @inheritdoc IBSX1000x
@@ -531,7 +541,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         uint256 nonce,
         int256 pnl,
         int256 fee
-    ) internal {
+    ) internal returns (int256) {
         int256 availableBalance = _balance[account].available.safeInt256();
         int256 settledAmount;
         if (pnl >= 0) {
@@ -558,6 +568,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
             }
             generalFund = newGeneralFund.safeUInt256();
         }
+
+        return settledAmount;
     }
 
     function _unlockFund(uint256 productId, uint256 amount) internal {
