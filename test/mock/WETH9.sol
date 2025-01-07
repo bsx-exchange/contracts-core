@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: UNLICENSED
 pragma solidity >=0.8.23;
 
+/* solhint-disable */
 contract WETH9Mock {
     string public name = "Wrapped Ether";
     string public symbol = "WETH";

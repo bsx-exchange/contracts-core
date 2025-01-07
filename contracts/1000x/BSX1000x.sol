@@ -4,24 +4,24 @@ pragma solidity ^0.8.23;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 
 import {Access} from "../exchange/access/Access.sol";
 import {IExchange} from "../exchange/interfaces/IExchange.sol";
-import {IERC20Extend} from "../exchange/interfaces/external/IERC20Extend.sol";
 import {IERC3009Minimal} from "../exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "../exchange/lib/Errors.sol";
 import {MathHelper} from "../exchange/lib/MathHelper.sol";
+import {UNIVERSAL_SIG_VALIDATOR} from "../exchange/share/Constants.sol";
 import {IBSX1000x} from "./interfaces/IBSX1000x.sol";
 
 /// @title BSX1000x contract
 /// @dev This contract is upgradeable.
 contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     using EnumerableMap for EnumerableMap.UintToUintMap;
-    using SafeERC20 for IERC20Extend;
+    using SafeERC20 for IERC20;
     using MathHelper for int128;
     using MathHelper for int256;
     using MathHelper for uint128;
@@ -31,7 +31,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         keccak256("OpenPosition(uint32 productId,address account,uint256 nonce,uint128 margin,uint128 leverage)");
     bytes32 public constant CLOSE_POSITION_TYPEHASH =
         keccak256("ClosePosition(uint32 productId,address account,uint256 nonce)");
-
+    bytes32 public constant TRANSFER_TO_EXCHANGE_TYPEHASH =
+        keccak256("TransferToExchange(address account,uint256 amount,uint256 nonce)");
     bytes32 public constant WITHDRAW_TYPEHASH = keccak256("Withdraw(address account,uint256 amount,uint256 nonce)");
 
     uint128 public constant MAX_LEVERAGE = 1000 * 10 ** 18;
@@ -44,7 +45,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     Access public access;
 
     /// @inheritdoc IBSX1000x
-    IERC20Extend public collateralToken;
+    IERC20 public collateralToken;
 
     /// @inheritdoc IBSX1000x
     uint256 public generalFund;
@@ -61,6 +62,10 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     EnumerableMap.UintToUintMap private _isolatedFunds;
 
     uint256 public lockedFund;
+
+    mapping(address account => mapping(uint256 nonce => bool used)) public isTransferToExchangeNonceUsed;
+
+    uint256 private lockFactor;
 
     function _checkRole(bytes32 role, address account) internal view {
         if (!access.hasRole(role, account)) {
@@ -151,7 +156,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         if (amount == 0 || amountToTransfer == 0) revert ZeroAmount();
 
         bytes32 withdrawHash = _hashTypedDataV4(keccak256(abi.encode(WITHDRAW_TYPEHASH, account, amount, nonce)));
-        if (!SignatureChecker.isValidSignatureNow(account, withdrawHash, signature)) {
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(account, withdrawHash, signature)) {
             revert InvalidSignature(account);
         }
 
@@ -176,6 +181,40 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         collateralToken.safeTransfer(account, amountToTransfer);
 
         emit WithdrawSucceeded(account, nonce, amount, fee, newBalance);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function transferToExchange(address account, uint256 amount, uint256 nonce, bytes memory signature)
+        external
+        onlyRole(access.BSX1000_OPERATOR_ROLE())
+    {
+        if (isTransferToExchangeNonceUsed[account][nonce]) {
+            revert TransferToExchange_UsedNonce(account, nonce);
+        }
+        isTransferToExchangeNonceUsed[account][nonce] = true;
+
+        bytes32 transferToExchangeHash =
+            _hashTypedDataV4(keccak256(abi.encode(TRANSFER_TO_EXCHANGE_TYPEHASH, account, amount, nonce)));
+        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(account, transferToExchangeHash, signature)) {
+            revert InvalidSignature(account);
+        }
+
+        IERC20 token = collateralToken;
+        uint256 amountToTransfer = amount.convertFromScale(address(token));
+        if (amountToTransfer == 0) revert ZeroAmount();
+
+        uint256 accountBalance = _balance[account].available;
+        if (accountBalance < amount) {
+            revert InsufficientAccountBalance();
+        }
+        uint256 newBalance = accountBalance - amount;
+        _balance[account].available = newBalance;
+
+        IExchange exchange = IExchange(access.getExchange());
+        token.forceApprove(address(exchange), amountToTransfer);
+        exchange.deposit(account, address(token), amount.safeUInt128());
+
+        emit TransferToExchange(account, nonce, amount, newBalance);
     }
 
     /// @inheritdoc IBSX1000x
@@ -235,7 +274,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         }
         generalFund = (generalFund.safeInt256() + order.fee).safeUInt256();
 
-        int256 maxProfit = order.margin.safeInt256() * MAX_PROFIT_FACTOR;
+        int256 maxProfit = order.margin.safeInt256() * lockFactor.safeInt256();
         int256 availableFund;
         if (_isolatedFunds.contains(order.productId)) {
             availableFund = _isolatedFunds.get(order.productId).safeInt256() - maxProfit;
@@ -308,8 +347,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
         // update balance
         _unlockMargin(account, nonce, position.margin);
-        _unlockFund(productId, position.margin * MAX_PROFIT_FACTOR.safeUInt256());
-        _updateBalanceAfterClosingPosition(productId, account, pnl, fee);
+        _unlockFund(productId, position.margin * lockFactor);
+        _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
 
         emit ClosePosition(productId, account, nonce, pnl, fee, ClosePositionReason.Normal);
     }
@@ -353,8 +392,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
         // update balance
         _unlockMargin(account, nonce, position.margin);
-        _unlockFund(productId, position.margin * MAX_PROFIT_FACTOR.safeUInt256());
-        _updateBalanceAfterClosingPosition(productId, account, pnl, fee);
+        _unlockFund(productId, position.margin * lockFactor);
+        _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
 
         emit ClosePosition(productId, account, nonce, pnl, fee, reason);
     }
@@ -426,6 +465,11 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         emit DepositIsolatedFund(productId, roundDownAmount, newFundBalance);
     }
 
+    /// @notice Set lock fund factor when opening position
+    function setLockFactor(uint256 factor) external onlyRole(access.GENERAL_ROLE()) {
+        lockFactor = factor;
+    }
+
     /// @inheritdoc IBSX1000x
     function isAuthorizedSigner(address account, address signer) public view returns (bool) {
         return IExchange(access.getExchange()).isSigningWallet(account, signer);
@@ -472,36 +516,43 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         _balance[account].available = accountBalance - lockAmount;
         _balance[account].locked += lockAmount;
         _credit[account][nonce] = credit;
-        generalFund -= credit;
     }
 
     function _unlockMargin(address account, uint256 nonce, uint256 margin) internal {
         uint256 credit = _credit[account][nonce];
-        uint256 lockedMargin = margin - credit;
-        _balance[account].locked -= lockedMargin;
-        _balance[account].available += margin;
-
-        delete _credit[account][nonce];
+        uint256 locked = margin - credit;
+        _balance[account].locked -= locked;
+        _balance[account].available += locked;
     }
 
-    function _updateBalanceAfterClosingPosition(uint32 productId, address account, int256 pnl, int256 fee) internal {
-        Balance storage accountBalance = _balance[account];
-        int256 updatedAccountBalance = accountBalance.available.safeInt256() + pnl - fee;
-        accountBalance.available = updatedAccountBalance > 0 ? updatedAccountBalance.safeUInt256() : 0;
+    function _updateBalanceAfterClosingPosition(
+        uint32 productId,
+        address account,
+        uint256 nonce,
+        int256 pnl,
+        int256 fee
+    ) internal {
+        int256 availableBalance = _balance[account].available.safeInt256();
+        int256 settledAmount;
+        if (pnl >= 0) {
+            settledAmount = pnl - fee;
+        } else {
+            int256 maxLoss = -(_position[account][nonce].margin.safeInt256() - _credit[account][nonce].safeInt256());
+            settledAmount = pnl - fee < maxLoss ? maxLoss : pnl - fee;
+        }
+        availableBalance += settledAmount;
+        _balance[account].available = availableBalance > 0 ? availableBalance.safeUInt256() : 0;
 
         if (_isolatedFunds.contains(productId)) {
             // settle pnl with isolated fund
             uint256 isolatedFund = _isolatedFunds.get(productId);
-            int256 newIsolatedFund = isolatedFund.safeInt256() - pnl;
+            int256 newIsolatedFund = isolatedFund.safeInt256() - settledAmount;
             if (newIsolatedFund < 0) {
                 revert InsufficientIsolatedFundBalance(productId);
             }
             _isolatedFunds.set(productId, newIsolatedFund.safeUInt256());
-
-            // collect fee into general fund
-            generalFund += fee.safeUInt256();
         } else {
-            int256 newGeneralFund = generalFund.safeInt256() - pnl + fee;
+            int256 newGeneralFund = generalFund.safeInt256() - settledAmount;
             if (newGeneralFund < 0) {
                 revert InsufficientFundBalance();
             }

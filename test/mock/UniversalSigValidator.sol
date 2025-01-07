@@ -7,6 +7,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 error ERC1271Revert(bytes error);
 error ERC6492DeployFailed(bytes error);
 
+/* solhint-disable */
 contract UniversalSigValidator {
     bytes32 private constant ERC6492_DETECTION_SUFFIX =
         0x6492649264926492649264926492649264926492649264926492649264926492;

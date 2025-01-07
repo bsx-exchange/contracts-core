@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 import {Access} from "../../exchange/access/Access.sol";
-import {IERC20Extend} from "../../exchange/interfaces/external/IERC20Extend.sol";
 
 /// @notice Interface for the BSX1000xs contract
 interface IBSX1000x {
@@ -87,6 +88,9 @@ interface IBSX1000x {
     /// @notice Thrown when the nonce for a withdrawal is used
     error Withdraw_UsedNonce(address account, uint256 nonce);
 
+    /// @notice Thrown when the nonce of transfer collateral to exchange is used
+    error TransferToExchange_UsedNonce(address account, uint256 nonce);
+
     /// @notice Thrown when the withdrawal fee exceeds the maximum allowed
     error ExceededMaxWithdrawalFee();
 
@@ -163,6 +167,13 @@ interface IBSX1000x {
         address indexed account, uint256 indexed nonce, uint256 amount, uint256 fee, uint256 balance
     );
 
+    /// @dev Emitted when transfer collateral to BSX exchange contract
+    /// @param account The account address
+    /// @param nonce The nonce of the transfer
+    /// @param amount The transferred amount (in 18 decimals)
+    /// @param balance The user's balance after the transfer (in 18 decimals)
+    event TransferToExchange(address indexed account, uint256 indexed nonce, uint256 amount, uint256 balance);
+
     /// @dev Emitted when a position is opened
     /// @param productId The product ID
     /// @param account The account address
@@ -235,6 +246,13 @@ interface IBSX1000x {
         bytes32 nonce,
         bytes calldata signature
     ) external;
+
+    /// @notice Transfer collateral to the exchange
+    /// @param account The account address
+    /// @param amount The amount to transfer (in 18 decimals)
+    /// @param nonce The nonce of the transfer
+    /// @param signature The signature of the transfer
+    function transferToExchange(address account, uint256 amount, uint256 nonce, bytes memory signature) external;
 
     /// @notice Withdraw collateral from the exchange
     /// @param account The account address
@@ -315,7 +333,7 @@ interface IBSX1000x {
     function access() external view returns (Access);
 
     /// @notice Returns the collateral token
-    function collateralToken() external view returns (IERC20Extend);
+    function collateralToken() external view returns (IERC20);
 
     /// @notice Returns the general fund balance used to pay profits for winning trades
     function generalFund() external view returns (uint256);

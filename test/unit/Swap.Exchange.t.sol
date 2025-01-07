@@ -17,6 +17,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {ISwap} from "contracts/exchange/interfaces/ISwap.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
+import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 
 contract SwapExchangeTest is Test {
     using stdStorage for StdStorage;
@@ -63,7 +64,7 @@ contract SwapExchangeTest is Test {
 
         exchange = new Exchange();
         bytes memory code = address(new UniversalSigValidator()).code;
-        vm.etch(address(exchange.UNIVERSAL_SIG_VALIDATOR()), code);
+        vm.etch(address(UNIVERSAL_SIG_VALIDATOR), code);
 
         access.setExchange(address(exchange));
         access.setClearingService(address(clearingService));
