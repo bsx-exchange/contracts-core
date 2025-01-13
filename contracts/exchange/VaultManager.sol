@@ -132,18 +132,21 @@ contract VaultManager is IVaultManager, Initializable {
         VaultData storage vaultData = _vaults[vault];
         StakerData storage staker = _stakers[vault][account];
 
-        uint256 shares = convertToShares(vault, amount);
-        uint256 currentShares = staker.shares;
-        // avgPrice = (currentShares * avgPrice + shares * currentPrice) / (currentShares + shares)
-        staker.avgPrice = (currentShares * staker.avgPrice + amount).mulDiv(PRICE_SCALE, currentShares + shares);
-        staker.shares = currentShares + shares;
+        uint256 mintShares = convertToShares(vault, amount);
+        uint256 currentPrice = amount.mulDiv(PRICE_SCALE, mintShares);
 
-        vaultData.totalShares += shares;
+        uint256 prevShares = staker.shares;
+        uint256 prevPrice = staker.avgPrice;
+
+        staker.avgPrice = (prevShares * prevPrice + mintShares * currentPrice) / (prevShares + mintShares);
+        staker.shares += mintShares;
+
+        vaultData.totalShares += mintShares;
 
         access.getClearingService().withdraw(account, amount, asset);
         access.getClearingService().deposit(vault, amount, asset);
 
-        return shares;
+        return mintShares;
     }
 
     /// @inheritdoc IVaultManager

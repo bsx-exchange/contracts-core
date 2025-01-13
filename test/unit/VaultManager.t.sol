@@ -254,6 +254,136 @@ contract VaultManagerTest is Test {
         assertEq(exchange.balanceOf(vault, address(asset)), 25 ether);
     }
 
+    function test_stake_multipleTimes_success() public {
+        _registerVault();
+
+        uint256 stakerTokenBalance = 500 ether;
+        _depositExchange(asset, staker, stakerTokenBalance);
+
+        uint256 nonce = 1;
+        uint256 stakeAmount1 = 25 ether;
+        uint256 expectedShares1 = 25 ether;
+        bytes32 structHash =
+            keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount1, nonce));
+        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.StakeVault,
+            abi.encode(
+                IExchange.StakeVaultParams({
+                    vault: vault,
+                    account: staker,
+                    token: address(asset),
+                    amount: stakeAmount1,
+                    nonce: nonce,
+                    signature: signature
+                })
+            )
+        );
+
+        // 1. stake 25 ether
+        vm.expectEmit(address(exchange));
+        emit IExchange.StakeVault(
+            vault, staker, nonce, address(asset), stakeAmount1, expectedShares1, IExchange.VaultActionStatus.Success
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
+        IVaultManager.StakerData memory stakerData = vaultManager.getStakerData(vault, staker);
+        assertEq(stakerData.shares, expectedShares1);
+        assertEq(stakerData.avgPrice, 1 ether);
+        IVaultManager.VaultData memory vaultData = vaultManager.getVaultData(vault);
+        assertEq(vaultData.totalShares, expectedShares1);
+        assertEq(exchange.balanceOf(staker, address(asset)), int256(stakerTokenBalance - stakeAmount1));
+        assertEq(exchange.balanceOf(vault, address(asset)), int256(stakeAmount1));
+
+        // 2. stake 50 ether
+        nonce = 2;
+        uint256 stakeAmount2 = 50 ether;
+        uint256 expectedShares2 = 50 ether;
+        structHash = keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount2, nonce));
+        signature = _signTypedData(stakerPrivKey, structHash);
+        operation = _encodeDataToOperation(
+            IExchange.OperationType.StakeVault,
+            abi.encode(
+                IExchange.StakeVaultParams({
+                    vault: vault,
+                    account: staker,
+                    token: address(asset),
+                    amount: stakeAmount2,
+                    nonce: nonce,
+                    signature: signature
+                })
+            )
+        );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.StakeVault(
+            vault, staker, nonce, address(asset), stakeAmount2, expectedShares2, IExchange.VaultActionStatus.Success
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
+        stakerData = vaultManager.getStakerData(vault, staker);
+        assertEq(stakerData.shares, expectedShares1 + expectedShares2);
+        assertEq(stakerData.avgPrice, 1 ether);
+        vaultData = vaultManager.getVaultData(vault);
+        assertEq(vaultData.totalShares, expectedShares1 + expectedShares2);
+        assertEq(exchange.balanceOf(staker, address(asset)), int256(stakerTokenBalance - stakeAmount1 - stakeAmount2));
+        assertEq(exchange.balanceOf(vault, address(asset)), int256(stakeAmount1 + stakeAmount2));
+
+        // current vault balance = 75 ether
+        // x2 vault balance = 150 ether => price = 2 ether
+        uint256 increasedAmount = 75 ether;
+        ISpot.AccountDelta[] memory accounts = new ISpot.AccountDelta[](1);
+        accounts[0] = ISpot.AccountDelta(address(asset), vault, int256(increasedAmount));
+        vm.prank(address(clearingService));
+        spotEngine.modifyAccount(accounts);
+
+        // 3. stake 50 ether
+        nonce = 3;
+        uint256 stakeAmount3 = 150 ether;
+        uint256 expectedShares3 = 75 ether;
+        structHash = keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount3, nonce));
+        signature = _signTypedData(stakerPrivKey, structHash);
+        operation = _encodeDataToOperation(
+            IExchange.OperationType.StakeVault,
+            abi.encode(
+                IExchange.StakeVaultParams({
+                    vault: vault,
+                    account: staker,
+                    token: address(asset),
+                    amount: stakeAmount3,
+                    nonce: nonce,
+                    signature: signature
+                })
+            )
+        );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.StakeVault(
+            vault, staker, nonce, address(asset), stakeAmount3, expectedShares3, IExchange.VaultActionStatus.Success
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
+        stakerData = vaultManager.getStakerData(vault, staker);
+        assertEq(stakerData.shares, expectedShares1 + expectedShares2 + expectedShares3);
+        assertEq(stakerData.avgPrice, 1.5 ether);
+        vaultData = vaultManager.getVaultData(vault);
+        assertEq(vaultData.totalShares, expectedShares1 + expectedShares2 + expectedShares3);
+        assertEq(
+            exchange.balanceOf(staker, address(asset)),
+            int256(stakerTokenBalance - stakeAmount1 - stakeAmount2 - stakeAmount3)
+        );
+        assertEq(
+            exchange.balanceOf(vault, address(asset)),
+            int256(stakeAmount1 + stakeAmount2 + stakeAmount3 + increasedAmount)
+        );
+    }
+
     function test_stake_revertIfUnauthorized() public {
         _registerVault();
 
