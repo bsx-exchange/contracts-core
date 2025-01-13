@@ -257,6 +257,8 @@ contract BSX1000xTest is Test {
         emit IBSX1000x.TransferToExchange(account, nonce, transferAmount, balance - transferAmount);
         bsx1000x.transferToExchange(account, transferAmount, nonce, signature);
 
+        assertEq(bsx1000x.isTransferToExchangeNonceUsed(account, nonce), true);
+
         IBSX1000x.Balance memory balanceAfter = bsx1000x.getBalance(account);
         assertEq(balanceAfter.available, balance - transferAmount);
         assertEq(balanceAfter.locked, 0);
@@ -303,6 +305,8 @@ contract BSX1000xTest is Test {
         vm.expectEmit(address(bsx1000x));
         emit IBSX1000x.TransferToExchange(contractAccount, nonce, transferAmount, balance - transferAmount);
         bsx1000x.transferToExchange(contractAccount, transferAmount, nonce, signature);
+
+        assertEq(bsx1000x.isTransferToExchangeNonceUsed(contractAccount, nonce), true);
 
         IBSX1000x.Balance memory balanceAfter = bsx1000x.getBalance(contractAccount);
         assertEq(balanceAfter.available, balance - transferAmount);
@@ -358,7 +362,7 @@ contract BSX1000xTest is Test {
         bsx1000x.transferToExchange(account, transferAmount, nonce, signature);
     }
 
-    function test_transferToExchange_revertsIfInvalidSignature() public {
+    function test_transferToExchange_emitsFailedEventIfInvalidSignature() public {
         address account = makeAddr("account");
         (, uint256 maliciousKey) = makeAddrAndKey("malicious");
         uint256 balance = 100 * 1e18;
@@ -370,12 +374,30 @@ contract BSX1000xTest is Test {
             keccak256(abi.encode(bsx1000x.TRANSFER_TO_EXCHANGE_TYPEHASH(), account, transferAmount, nonce));
         bytes memory signature = _signTypedDataHash(maliciousKey, structHash);
 
+        uint256 bsx1000BalanceBefore = collateralToken.balanceOf(address(bsx1000x));
+        IBSX1000x.Balance memory balanceBefore = bsx1000x.getBalance(account);
+
         vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InvalidSignature.selector, account));
+        vm.prank(address(bsx1000x));
+        bsx1000x.innerTransferToExchange(account, transferAmount, nonce, signature);
+
+        vm.expectEmit(address(bsx1000x));
+        emit IBSX1000x.TransferToExchange(account, nonce, 0, balance);
         bsx1000x.transferToExchange(account, transferAmount, nonce, signature);
+
+        assertEq(bsx1000x.isTransferToExchangeNonceUsed(account, nonce), true);
+
+        IBSX1000x.Balance memory balanceAfter = bsx1000x.getBalance(account);
+        assertEq(balanceAfter.available, balanceBefore.available);
+        assertEq(balanceAfter.locked, balanceBefore.locked);
+
+        assertEq(bsx1000BalanceBefore, collateralToken.balanceOf(address(bsx1000x)));
     }
 
-    function test_transferToExchange_revertsIfAmountExceedsBalance() public {
+    function test_transferToExchange_emitsFailedEventIfAmountExceedsBalance() public {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
+        uint256 balance = 20 * 1e18;
+        _deposit(account, balance);
 
         uint256 nonce = 1;
         uint256 transferAmount = 25 * 1e18;
@@ -383,8 +405,24 @@ contract BSX1000xTest is Test {
             keccak256(abi.encode(bsx1000x.TRANSFER_TO_EXCHANGE_TYPEHASH(), account, transferAmount, nonce));
         bytes memory signature = _signTypedDataHash(accountKey, structHash);
 
+        uint256 bsx1000BalanceBefore = collateralToken.balanceOf(address(bsx1000x));
+        IBSX1000x.Balance memory balanceBefore = bsx1000x.getBalance(account);
+
         vm.expectRevert(IBSX1000x.InsufficientAccountBalance.selector);
+        vm.prank(address(bsx1000x));
+        bsx1000x.innerTransferToExchange(account, transferAmount, nonce, signature);
+
+        vm.expectEmit(address(bsx1000x));
+        emit IBSX1000x.TransferToExchange(account, nonce, 0, balance);
         bsx1000x.transferToExchange(account, transferAmount, nonce, signature);
+
+        assertEq(bsx1000x.isTransferToExchangeNonceUsed(account, nonce), true);
+
+        IBSX1000x.Balance memory balanceAfter = bsx1000x.getBalance(account);
+        assertEq(balanceAfter.available, balanceBefore.available);
+        assertEq(balanceAfter.locked, balanceBefore.locked);
+
+        assertEq(bsx1000BalanceBefore, collateralToken.balanceOf(address(bsx1000x)));
     }
 
     function test_transferToExchange_revertsIfZeroAmount() public {
@@ -398,8 +436,36 @@ contract BSX1000xTest is Test {
             keccak256(abi.encode(bsx1000x.TRANSFER_TO_EXCHANGE_TYPEHASH(), account, transferAmount, nonce));
         bytes memory signature = _signTypedDataHash(accountKey, structHash);
 
+        uint256 bsx1000BalanceBefore = collateralToken.balanceOf(address(bsx1000x));
+        IBSX1000x.Balance memory balanceBefore = bsx1000x.getBalance(account);
+
         vm.expectRevert(IBSX1000x.ZeroAmount.selector);
+        vm.prank(address(bsx1000x));
+        bsx1000x.innerTransferToExchange(account, transferAmount, nonce, signature);
+
+        vm.expectEmit(address(bsx1000x));
+        emit IBSX1000x.TransferToExchange(account, nonce, 0, balance);
         bsx1000x.transferToExchange(account, transferAmount, nonce, signature);
+
+        assertEq(bsx1000x.isTransferToExchangeNonceUsed(account, nonce), true);
+
+        IBSX1000x.Balance memory balanceAfter = bsx1000x.getBalance(account);
+        assertEq(balanceAfter.available, balanceBefore.available);
+        assertEq(balanceAfter.locked, balanceBefore.locked);
+
+        assertEq(bsx1000BalanceBefore, collateralToken.balanceOf(address(bsx1000x)));
+    }
+
+    function test_innerTransferToExchange_revertsIfCallerNotThisContract() public {
+        address account = makeAddr("account");
+        uint256 amount = 1000;
+        uint256 nonce = 1;
+        bytes memory signature = abi.encodePacked("signature");
+
+        address malicious = makeAddr("malicious");
+        vm.prank(malicious);
+        vm.expectRevert(IBSX1000x.InternalCall.selector);
+        bsx1000x.innerTransferToExchange(account, amount, nonce, signature);
     }
 
     function test_withdraw_EOA() public {

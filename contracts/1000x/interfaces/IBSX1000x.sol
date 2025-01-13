@@ -67,6 +67,9 @@ interface IBSX1000x {
     /// @notice Thrown when the nonce for an authorizing signer is used
     error AuthorizeSigner_UsedNonce(address account, uint256 nonce);
 
+    /// @notice Thrown when caller is not this contract
+    error InternalCall();
+
     /// @notice Thrown when the order with the same nonce already exists
     error PositionExisted(address account, uint256 nonce);
 

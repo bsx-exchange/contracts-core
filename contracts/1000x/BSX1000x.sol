@@ -73,6 +73,13 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         }
     }
 
+    modifier internalCall() {
+        if (msg.sender != address(this)) {
+            revert InternalCall();
+        }
+        _;
+    }
+
     modifier onlyRole(bytes32 role) {
         _checkRole(role, msg.sender);
         _;
@@ -193,6 +200,19 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         }
         isTransferToExchangeNonceUsed[account][nonce] = true;
 
+        try this.innerTransferToExchange(account, amount, nonce, signature) returns (uint256 newBalance) {
+            emit TransferToExchange(account, nonce, amount, newBalance);
+        } catch {
+            uint256 accountBalance = _balance[account].available;
+            emit TransferToExchange(account, nonce, 0, accountBalance);
+        }
+    }
+
+    function innerTransferToExchange(address account, uint256 amount, uint256 nonce, bytes memory signature)
+        external
+        internalCall
+        returns (uint256 newBalance)
+    {
         bytes32 transferToExchangeHash =
             _hashTypedDataV4(keccak256(abi.encode(TRANSFER_TO_EXCHANGE_TYPEHASH, account, amount, nonce)));
         if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(account, transferToExchangeHash, signature)) {
@@ -207,14 +227,12 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         if (accountBalance < amount) {
             revert InsufficientAccountBalance();
         }
-        uint256 newBalance = accountBalance - amount;
+        newBalance = accountBalance - amount;
         _balance[account].available = newBalance;
 
         IExchange exchange = access.getExchange();
         token.forceApprove(address(exchange), amountToTransfer);
         exchange.deposit(account, address(token), amount.safeUInt128());
-
-        emit TransferToExchange(account, nonce, amount, newBalance);
     }
 
     /// @inheritdoc IBSX1000x
@@ -541,9 +559,9 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         uint256 nonce,
         int256 pnl,
         int256 fee
-    ) internal returns (int256) {
+    ) internal returns (int256 settledAmount) {
         int256 availableBalance = _balance[account].available.safeInt256();
-        int256 settledAmount;
+        settledAmount;
         if (pnl >= 0) {
             settledAmount = pnl - fee;
         } else {
@@ -568,8 +586,6 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
             }
             generalFund = newGeneralFund.safeUInt256();
         }
-
-        return settledAmount;
     }
 
     function _unlockFund(uint256 productId, uint256 amount) internal {
