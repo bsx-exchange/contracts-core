@@ -2,6 +2,7 @@
 pragma solidity ^0.8.23;
 
 import {ILiquidation} from "./ILiquidation.sol";
+import {IOrderBook} from "./IOrderBook.sol";
 import {ISwap} from "./ISwap.sol";
 
 /// @title Exchange
@@ -68,12 +69,14 @@ interface IExchange is ILiquidation, ISwap {
     /// @dev Emitted when referral rebate is paid
     /// @param referrer Referrer address
     /// @param amount Rebate amount
-    event RebateReferrer(address indexed referrer, uint256 amount);
+    /// @param isFeeInBSX Whether the fee is in BSX or not
+    event RebateReferrer(address indexed referrer, uint256 amount, bool isFeeInBSX);
 
     /// @dev Emitted when maker is rebated
     /// @param maker Maker address
     /// @param amount Rebate amount
-    event RebateMaker(address indexed maker, uint256 amount);
+    /// @param isFeeInBSX Whether the fee is in BSX or not
+    event RebateMaker(address indexed maker, uint256 amount, bool isFeeInBSX);
 
     /// @dev Emitted when the funding rate is updated.
     /// @param productIndex Product id
@@ -92,7 +95,7 @@ interface IExchange is ILiquidation, ISwap {
     event WithdrawInsuranceFund(uint256 withdrawAmount, uint256 insuranceFund);
 
     /// @notice Emitted when trading fees are claimed
-    event ClaimTradingFees(address indexed claimer, uint256 amount);
+    event ClaimTradingFees(address indexed claimer, IOrderBook.FeeCollection fees);
 
     /// @notice Emitted when sequencer fees are claimed
     event ClaimSequencerFees(address indexed claimer, address indexed token, uint256 amount);
@@ -335,7 +338,7 @@ interface IExchange is ILiquidation, ISwap {
     function getSupportedTokenList() external view returns (address[] memory);
 
     /// @notice Gets collected trading fees
-    function getTradingFees() external view returns (int128);
+    function getTradingFees() external view returns (IOrderBook.FeeCollection memory);
 
     /// @notice Gets collected sequencer fees
     /// @param token Token address

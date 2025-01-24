@@ -7,7 +7,7 @@ import {ISpot} from "../../interfaces/ISpot.sol";
 import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
 import {Percentage} from "../../lib/Percentage.sol";
-import {MAX_REBATE_RATE} from "../../share/Constants.sol";
+import {BSX_TOKEN, MAX_REBATE_RATE} from "../../share/Constants.sol";
 import {GenericLogic} from "./GenericLogic.sol";
 
 library OrderLogic {
@@ -15,30 +15,18 @@ library OrderLogic {
     using MathHelper for uint128;
     using Percentage for uint128;
 
-    enum OrderSide {
-        BUY,
-        SELL
-    }
-
-    struct Order {
-        address sender;
-        uint128 size;
-        uint128 price;
-        uint64 nonce;
-        uint8 productIndex;
-        OrderSide orderSide;
-    }
+    uint256 private constant TRANSACTION_ID_BYTES = 4;
+    uint256 private constant ORDER_BYTES = 164;
+    uint256 private constant SEQUENCER_FEE_BYTES = 16;
+    uint256 private constant REFERRAL_BYTES = 22;
+    uint256 private constant LIQUIDATION_FEE_BYTES = 16;
+    uint256 private constant IS_FEE_IN_BSX_BYTES = 1;
 
     struct SignedOrder {
-        Order order;
+        IOrderBook.Order order;
         bytes signature;
         address signer;
         bool isLiquidation;
-    }
-
-    struct MatchOrders {
-        SignedOrder maker;
-        SignedOrder taker;
     }
 
     struct OrderEngine {
@@ -51,120 +39,76 @@ library OrderLogic {
 
     /// @notice Match two non-liquidation orders
     function matchOrders(IExchange exchange, OrderEngine calldata engine, bytes calldata data) external {
-        uint32 transactionId = uint32(bytes4(data[1:5]));
+        WrappedData memory wd = _decodeData(data);
 
-        SignedOrder memory maker;
-        SignedOrder memory taker;
-        IOrderBook.Fee memory matchFee;
-        IOrderBook.OrderHash memory digest;
-
-        // 165 bytes for an order
-        (maker.order, maker.signature, maker.signer, maker.isLiquidation, matchFee.maker) =
-            _parseDataToOrder(data[5:169]);
-        digest.maker = _getOrderDigest(exchange.hashTypedDataV4, maker.order);
-        GenericLogic.verifySignature(maker.signer, digest.maker, maker.signature);
-        if (!exchange.isSigningWallet(maker.order.sender, maker.signer)) {
-            revert Errors.Exchange_UnauthorizedSigner(maker.order.sender, maker.signer);
-        }
-        // 165 bytes for an order
-        (taker.order, taker.signature, taker.signer, taker.isLiquidation, matchFee.taker) =
-            _parseDataToOrder(data[169:333]);
-        uint128 takerSequencerFee = uint128(bytes16(data[333:349])); //16 bytes for takerSequencerFee
-        digest.taker = _getOrderDigest(exchange.hashTypedDataV4, taker.order);
-
-        if (taker.isLiquidation || maker.isLiquidation) {
-            revert Errors.Exchange_LiquidatedOrder(transactionId);
+        wd.maker.order.orderHash = _getOrderDigest(exchange.hashTypedDataV4, wd.maker.order);
+        GenericLogic.verifySignature(wd.maker.signer, wd.maker.order.orderHash, wd.maker.signature);
+        if (!exchange.isSigningWallet(wd.maker.order.sender, wd.maker.signer)) {
+            revert Errors.Exchange_UnauthorizedSigner(wd.maker.order.sender, wd.maker.signer);
         }
 
-        GenericLogic.verifySignature(taker.signer, digest.taker, taker.signature);
-        if (!exchange.isSigningWallet(taker.order.sender, taker.signer)) {
-            revert Errors.Exchange_UnauthorizedSigner(taker.order.sender, taker.signer);
+        wd.taker.order.orderHash = _getOrderDigest(exchange.hashTypedDataV4, wd.taker.order);
+        GenericLogic.verifySignature(wd.taker.signer, wd.taker.order.orderHash, wd.taker.signature);
+        if (!exchange.isSigningWallet(wd.taker.order.sender, wd.taker.signer)) {
+            revert Errors.Exchange_UnauthorizedSigner(wd.taker.order.sender, wd.taker.signer);
         }
 
-        if (maker.order.productIndex != taker.order.productIndex) {
+        if (wd.taker.isLiquidation || wd.maker.isLiquidation) {
+            revert Errors.Exchange_LiquidatedOrder(wd.transactionId);
+        }
+
+        if (wd.maker.order.productIndex != wd.taker.order.productIndex) {
             revert Errors.Exchange_ProductIdMismatch();
         }
 
-        // 20 bytes is makerReferrer
-        // 2 bytes is makerReferrerRebateRate
-        // 20 bytes is takerReferrer
-        // 2 bytes is takerReferrerRebateRate
-        if (data.length > 349) {
-            (address makerReferrer, uint16 makerReferrerRebateRate) = _parseReferralData(data[349:371]);
-            matchFee.referralRebate += _rebateReferrer(engine, matchFee.maker, makerReferrer, makerReferrerRebateRate);
+        wd.fees.makerReferralRebate = _rebateReferrer(engine, wd.makerReferral, wd.fees.maker, wd.fees.isMakerFeeInBSX);
+        wd.fees.takerReferralRebate = _rebateReferrer(engine, wd.takerReferral, wd.fees.taker, wd.fees.isTakerFeeInBSX);
 
-            (address takerReferrer, uint16 takerReferrerRebateRate) = _parseReferralData(data[371:393]);
-            matchFee.referralRebate += _rebateReferrer(engine, matchFee.taker, takerReferrer, takerReferrerRebateRate);
-        }
-        matchFee.maker = _rebateMaker(engine, maker.order.sender, matchFee.maker);
+        wd.fees.maker = _rebateMaker(engine, wd.maker.order.sender, wd.fees.maker, wd.fees.isMakerFeeInBSX);
 
-        engine.orderbook.matchOrders(maker, taker, digest, maker.order.productIndex, takerSequencerFee, matchFee);
+        engine.orderbook.matchOrders(
+            wd.maker.order.productIndex, wd.maker.order, wd.taker.order, wd.fees, wd.taker.isLiquidation
+        );
     }
 
     /// @notice Match a liquidation order with a non-liquidation order
     function matchLiquidationOrders(IExchange exchange, OrderEngine calldata engine, bytes calldata data) external {
-        uint32 transactionId = uint32(bytes4(data[1:5]));
+        WrappedData memory wd = _decodeData(data);
 
-        SignedOrder memory maker;
-        SignedOrder memory taker;
-        IOrderBook.Fee memory matchFee;
-        IOrderBook.OrderHash memory digest;
-
-        // 165 bytes for an order
-        (maker.order, maker.signature, maker.signer, maker.isLiquidation, matchFee.maker) =
-            _parseDataToOrder(data[5:169]);
-        digest.maker = _getOrderDigest(exchange.hashTypedDataV4, maker.order);
-
-        // 165 bytes for an order
-        (taker.order, taker.signature, taker.signer, taker.isLiquidation, matchFee.taker) =
-            _parseDataToOrder(data[169:333]);
-        uint128 takerSequencerFee = uint128(bytes16(data[333:349])); //16 bytes for takerSequencerFee
-        digest.taker = _getOrderDigest(exchange.hashTypedDataV4, taker.order);
-
-        if (!taker.isLiquidation) {
-            revert Errors.Exchange_NotLiquidatedOrder(transactionId);
-        }
-        if (maker.isLiquidation) {
-            revert Errors.Exchange_MakerLiquidatedOrder(transactionId);
+        wd.maker.order.orderHash = _getOrderDigest(exchange.hashTypedDataV4, wd.maker.order);
+        GenericLogic.verifySignature(wd.maker.signer, wd.maker.order.orderHash, wd.maker.signature);
+        if (!exchange.isSigningWallet(wd.maker.order.sender, wd.maker.signer)) {
+            revert Errors.Exchange_UnauthorizedSigner(wd.maker.order.sender, wd.maker.signer);
         }
 
-        GenericLogic.verifySignature(maker.signer, digest.maker, maker.signature);
-        if (!exchange.isSigningWallet(maker.order.sender, maker.signer)) {
-            revert Errors.Exchange_UnauthorizedSigner(maker.order.sender, maker.signer);
+        wd.taker.order.orderHash = _getOrderDigest(exchange.hashTypedDataV4, wd.taker.order);
+
+        if (!wd.taker.isLiquidation) {
+            revert Errors.Exchange_NotLiquidatedOrder(wd.transactionId);
+        }
+        if (wd.maker.isLiquidation) {
+            revert Errors.Exchange_MakerLiquidatedOrder(wd.transactionId);
         }
 
-        if (maker.order.productIndex != taker.order.productIndex) {
+        if (wd.maker.order.productIndex != wd.taker.order.productIndex) {
             revert Errors.Exchange_ProductIdMismatch();
         }
 
-        // 20 bytes is makerReferrer
-        // 2 bytes is makerReferrerRebateRate
-        // 20 bytes is takerReferrer
-        // 2 bytes is takerReferrerRebateRate
-        if (data.length > 349) {
-            (address makerReferrer, uint16 makerReferrerRebateRate) = _parseReferralData(data[349:371]);
-            matchFee.referralRebate += _rebateReferrer(engine, matchFee.maker, makerReferrer, makerReferrerRebateRate);
+        wd.fees.makerReferralRebate = _rebateReferrer(engine, wd.makerReferral, wd.fees.maker, wd.fees.isMakerFeeInBSX);
+        wd.fees.takerReferralRebate = _rebateReferrer(engine, wd.takerReferral, wd.fees.taker, wd.fees.isTakerFeeInBSX);
 
-            (address takerReferrer, uint16 takerReferrerRebateRate) = _parseReferralData(data[371:393]);
-            matchFee.referralRebate += _rebateReferrer(engine, matchFee.taker, takerReferrer, takerReferrerRebateRate);
-        }
-        matchFee.maker = _rebateMaker(engine, maker.order.sender, matchFee.maker);
+        wd.fees.maker = _rebateMaker(engine, wd.maker.order.sender, wd.fees.maker, wd.fees.isMakerFeeInBSX);
 
-        // 16 bytes is liquidation fee
-        if (data.length > 393) {
-            uint128 liquidationFee = uint128(bytes16(data[393:409])); //16 bytes for liquidation fee
-            matchFee.liquidationPenalty = liquidationFee;
-        }
-
-        engine.orderbook.matchOrders(maker, taker, digest, maker.order.productIndex, takerSequencerFee, matchFee);
+        engine.orderbook.matchOrders(
+            wd.maker.order.productIndex, wd.maker.order, wd.taker.order, wd.fees, wd.taker.isLiquidation
+        );
     }
 
     /// @dev Hash an order using EIP712
-    function _getOrderDigest(function (bytes32) external view returns(bytes32) _hashTypedDataV4, Order memory order)
-        internal
-        view
-        returns (bytes32)
-    {
+    function _getOrderDigest(
+        function (bytes32) external view returns(bytes32) _hashTypedDataV4,
+        IOrderBook.Order memory order
+    ) internal view returns (bytes32) {
         return _hashTypedDataV4(
             keccak256(
                 abi.encode(
@@ -180,11 +124,173 @@ library OrderLogic {
         );
     }
 
+    /// @dev Calculate the fee and rebate for an order
+    function _rebateReferrer(OrderEngine calldata engine, Referral memory referral, int128 fee, bool isFeeInBSX)
+        internal
+        returns (uint128 rebate)
+    {
+        if (referral.referrer == address(0) || referral.rebateRate == 0 || fee <= 0) {
+            return 0;
+        }
+
+        if (referral.rebateRate > MAX_REBATE_RATE) {
+            revert Errors.Exchange_ExceededMaxRebateRate(referral.rebateRate, MAX_REBATE_RATE);
+        }
+
+        rebate = fee.safeUInt128().calculatePercentage(referral.rebateRate);
+
+        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
+        address token = isFeeInBSX ? BSX_TOKEN : engine.orderbook.getCollateralToken();
+        productDeltas[0] = ISpot.AccountDelta(token, referral.referrer, rebate.safeInt128());
+        engine.spot.modifyAccount(productDeltas);
+
+        emit IExchange.RebateReferrer(referral.referrer, rebate, isFeeInBSX);
+    }
+
+    /// @dev Rebate maker if the fee is defined as negative
+    /// @return Maker fee after rebate
+    function _rebateMaker(OrderEngine calldata engine, address maker, int128 fee, bool isFeeInBSX)
+        internal
+        returns (int128)
+    {
+        if (fee >= 0) {
+            return fee;
+        }
+
+        uint128 rebate = fee.abs();
+        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
+        address token = isFeeInBSX ? BSX_TOKEN : engine.orderbook.getCollateralToken();
+        productDeltas[0] = ISpot.AccountDelta(token, maker, rebate.safeInt128());
+        engine.spot.modifyAccount(productDeltas);
+
+        emit IExchange.RebateMaker(maker, rebate, isFeeInBSX);
+
+        return 0;
+    }
+
+    enum DataType {
+        TransactionId,
+        MakerOrder,
+        TakerOrder,
+        TakerSequencerFee,
+        MakerReferrer,
+        TakerReferrer,
+        LiquidationFee,
+        IsMakerFeeInBSX,
+        IsTakerFeeInBSX
+    }
+
+    function _getDataIndexRange(DataType t) private pure returns (uint256 startIdx, uint256 endIdx) {
+        startIdx = 0;
+        endIdx += TRANSACTION_ID_BYTES;
+        if (t == DataType.TransactionId) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += ORDER_BYTES;
+        if (t == DataType.MakerOrder) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += ORDER_BYTES;
+        if (t == DataType.TakerOrder) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += SEQUENCER_FEE_BYTES;
+        if (t == DataType.TakerSequencerFee) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += REFERRAL_BYTES;
+        if (t == DataType.MakerReferrer) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += REFERRAL_BYTES;
+        if (t == DataType.TakerReferrer) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += LIQUIDATION_FEE_BYTES;
+        if (t == DataType.LiquidationFee) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += IS_FEE_IN_BSX_BYTES;
+        if (t == DataType.IsMakerFeeInBSX) {
+            return (startIdx, endIdx);
+        }
+
+        startIdx = endIdx;
+        endIdx += IS_FEE_IN_BSX_BYTES;
+        if (t == DataType.IsTakerFeeInBSX) {
+            return (startIdx, endIdx);
+        }
+    }
+
+    struct Referral {
+        address referrer;
+        uint16 rebateRate;
+    }
+
+    struct WrappedData {
+        uint32 transactionId;
+        SignedOrder maker;
+        SignedOrder taker;
+        IOrderBook.Fees fees;
+        Referral makerReferral;
+        Referral takerReferral;
+    }
+
+    function _decodeData(bytes calldata data) private pure returns (WrappedData memory wrappedData) {
+        (uint256 from, uint256 to) = _getDataIndexRange(DataType.TransactionId);
+        wrappedData.transactionId = uint32(bytes4(data[from:to]));
+
+        (from, to) = _getDataIndexRange(DataType.MakerOrder);
+        (wrappedData.maker, wrappedData.fees.maker) = _decodeSignedOrder(data[from:to]);
+
+        (from, to) = _getDataIndexRange(DataType.TakerOrder);
+        (wrappedData.taker, wrappedData.fees.taker) = _decodeSignedOrder(data[from:to]);
+
+        (from, to) = _getDataIndexRange(DataType.TakerSequencerFee);
+        wrappedData.fees.sequencer = uint128(bytes16(data[from:to]));
+
+        (from, to) = _getDataIndexRange(DataType.MakerReferrer);
+        wrappedData.makerReferral = _decodeReferralData(data[from:to]);
+
+        (from, to) = _getDataIndexRange(DataType.TakerReferrer);
+        wrappedData.takerReferral = _decodeReferralData(data[from:to]);
+
+        (from, to) = _getDataIndexRange(DataType.LiquidationFee);
+        wrappedData.fees.liquidation = uint128(bytes16(data[from:to]));
+
+        // avoid breaking changes
+        if (data.length == to) {
+            return wrappedData;
+        }
+
+        (from, to) = _getDataIndexRange(DataType.IsMakerFeeInBSX);
+        wrappedData.fees.isMakerFeeInBSX = uint8(data[from]) != 0;
+
+        (from, to) = _getDataIndexRange(DataType.IsTakerFeeInBSX);
+        wrappedData.fees.isTakerFeeInBSX = uint8(data[from]) != 0;
+
+        return wrappedData;
+    }
+
     /// @dev Parse encoded data to order
-    function _parseDataToOrder(bytes calldata data)
+    function _decodeSignedOrder(bytes calldata data)
         internal
         pure
-        returns (Order memory, bytes memory signature, address signer, bool isLiquidation, int128 matchFee)
+        returns (SignedOrder memory signedOrder, int128 tradingFee)
     {
         //Fisrt 20 bytes is sender
         //next  16 bytes is size
@@ -195,72 +301,28 @@ library OrderLogic {
         //next  65 bytes is signature
         //next  20 bytes is signer
         //next  1 byte is isLiquidation
-        //next  16 bytes is match fee
+        //next  16 bytes is trading fee
         //sum 164
-        Order memory order;
-        order.sender = address(bytes20(data[0:20]));
-        order.size = uint128(bytes16(data[20:36]));
-        order.price = uint128(bytes16(data[36:52]));
-        order.nonce = uint64(bytes8(data[52:60]));
-        order.productIndex = uint8(data[60]);
-        order.orderSide = OrderSide(uint8(data[61]));
-        signature = data[62:127];
-        signer = address(bytes20(data[127:147]));
-        isLiquidation = uint8(data[147]) == 1;
-        matchFee = int128(uint128(bytes16(data[148:164])));
+        signedOrder.order.sender = address(bytes20(data[0:20]));
+        signedOrder.order.size = uint128(bytes16(data[20:36]));
+        signedOrder.order.price = uint128(bytes16(data[36:52]));
+        signedOrder.order.nonce = uint64(bytes8(data[52:60]));
+        signedOrder.order.productIndex = uint8(data[60]);
+        signedOrder.order.orderSide = IOrderBook.OrderSide(uint8(data[61]));
+        signedOrder.signature = data[62:127];
+        signedOrder.signer = address(bytes20(data[127:147]));
+        signedOrder.isLiquidation = uint8(data[147]) == 1;
+        tradingFee = int128(uint128(bytes16(data[148:164])));
 
-        return (order, signature, signer, isLiquidation, matchFee);
+        return (signedOrder, tradingFee);
     }
 
     /// @dev Parses referral data from encoded data
     /// @param data Encoded data
-    function _parseReferralData(bytes calldata data)
-        internal
-        pure
-        returns (address referrer, uint16 referrerRebateRate)
-    {
+    function _decodeReferralData(bytes calldata data) internal pure returns (Referral memory referral) {
         // 20 bytes is referrer
         // 2 bytes is referrer rebate rate
-        referrer = address(bytes20(data[0:20]));
-        referrerRebateRate = uint16(bytes2(data[20:22]));
-    }
-
-    /// @dev Calculate the fee and rebate for an order
-    function _rebateReferrer(OrderEngine calldata engine, int128 fee, address referrer, uint16 rebateRate)
-        internal
-        returns (uint128 rebate)
-    {
-        if (referrer == address(0) || rebateRate == 0 || fee <= 0) {
-            return 0;
-        }
-
-        if (rebateRate > MAX_REBATE_RATE) {
-            revert Errors.Exchange_ExceededMaxRebateRate(rebateRate, MAX_REBATE_RATE);
-        }
-
-        rebate = fee.safeUInt128().calculatePercentage(rebateRate);
-
-        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
-        productDeltas[0] = ISpot.AccountDelta(engine.orderbook.getCollateralToken(), referrer, rebate.safeInt128());
-        engine.spot.modifyAccount(productDeltas);
-
-        emit IExchange.RebateReferrer(referrer, rebate);
-    }
-
-    /// @dev Rebate maker if the fee is defined as negative
-    /// @return Maker fee after rebate
-    function _rebateMaker(OrderEngine calldata engine, address maker, int128 fee) internal returns (int128) {
-        if (fee >= 0) {
-            return fee;
-        }
-
-        uint128 rebate = fee.abs();
-        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
-        productDeltas[0] = ISpot.AccountDelta(engine.orderbook.getCollateralToken(), maker, rebate.safeInt128());
-        engine.spot.modifyAccount(productDeltas);
-
-        emit IExchange.RebateMaker(maker, rebate);
-
-        return 0;
+        referral.referrer = address(bytes20(data[0:20]));
+        referral.rebateRate = uint16(bytes2(data[20:22]));
     }
 }

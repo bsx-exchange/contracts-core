@@ -12,6 +12,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 import {IBSX1000x} from "../1000x/interfaces/IBSX1000x.sol";
 import {ExchangeStorage} from "./ExchangeStorage.sol";
 import {IExchange, ILiquidation, ISwap} from "./interfaces/IExchange.sol";
+import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IVaultManager} from "./interfaces/IVaultManager.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
@@ -20,7 +21,7 @@ import {GenericLogic} from "./lib/logic/GenericLogic.sol";
 import {LiquidationLogic} from "./lib/logic/LiquidationLogic.sol";
 import {OrderLogic} from "./lib/logic/OrderLogic.sol";
 import {SwapLogic} from "./lib/logic/SwapLogic.sol";
-import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
+import {BSX_TOKEN, NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
 
 /// @title Exchange contract
 /// @notice This contract is entry point of the exchange
@@ -31,6 +32,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     using MathHelper for uint128;
     using MathHelper for uint256;
     using MathHelper for int256;
+    using MathHelper for int128;
 
     bytes32 public constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
     bytes32 public constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
@@ -183,16 +185,22 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @inheritdoc IExchange
     function claimTradingFees() external onlyRole(access.GENERAL_ROLE()) {
-        address token = book.getCollateralToken();
-        uint256 totalFee = book.claimTradingFees().safeUInt256();
-        uint256 amountToTransfer = totalFee.convertFromScale(token);
-        IERC20(token).safeTransfer(feeRecipientAddress, amountToTransfer);
-        emit ClaimTradingFees(msg.sender, totalFee);
+        IOrderBook.FeeCollection memory tradingFees = book.claimTradingFees();
+
+        address usdc = book.getCollateralToken();
+        uint256 usdcAmount = tradingFees.inUSDC.safeUInt256();
+        IERC20(usdc).safeTransfer(feeRecipientAddress, usdcAmount.convertFromScale(usdc));
+
+        uint256 bsxAmount = tradingFees.inBSX.safeUInt256();
+        IERC20(BSX_TOKEN).safeTransfer(feeRecipientAddress, bsxAmount.convertFromScale(BSX_TOKEN));
+
+        emit ClaimTradingFees(msg.sender, tradingFees);
     }
 
     /// @inheritdoc IExchange
     function claimSequencerFees() external onlyRole(access.GENERAL_ROLE()) {
         address underlyingAsset = book.getCollateralToken();
+        IOrderBook.FeeCollection memory sequencerFees = book.claimSequencerFees();
 
         for (uint256 i = 0; i < supportedTokens.length(); ++i) {
             address token = supportedTokens.at(i);
@@ -200,15 +208,17 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
                 continue;
             }
 
-            uint256 totalFee = _collectedFee[token];
+            uint256 totalFees = _collectedFee[token];
             if (token == underlyingAsset) {
-                totalFee += book.claimSequencerFees().safeUInt256();
+                totalFees += sequencerFees.inUSDC.safeUInt256();
+            } else if (token == BSX_TOKEN) {
+                totalFees += sequencerFees.inBSX.safeUInt256();
             }
             _collectedFee[token] = 0;
 
-            uint256 amountToTransfer = totalFee.convertFromScale(token);
+            uint256 amountToTransfer = totalFees.convertFromScale(token);
             IERC20(token).safeTransfer(feeRecipientAddress, amountToTransfer);
-            emit ClaimSequencerFees(msg.sender, token, totalFee);
+            emit ClaimSequencerFees(msg.sender, token, totalFees);
         }
     }
 
@@ -324,7 +334,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function getTradingFees() external view returns (int128) {
+    function getTradingFees() external view returns (IOrderBook.FeeCollection memory) {
         return book.getTradingFees();
     }
 
@@ -333,7 +343,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         address underlyingAsset = book.getCollateralToken();
         uint256 fees = _collectedFee[token];
         if (token == underlyingAsset) {
-            fees += book.getSequencerFees().safeUInt256();
+            fees += book.getSequencerFees().inUSDC.safeUInt256();
+        } else if (token == BSX_TOKEN) {
+            fees += book.getSequencerFees().inBSX.safeUInt256();
         }
 
         return fees;
@@ -400,9 +412,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         }
         executedTransactionCounter++;
         if (operationType == OperationType.MatchOrders) {
-            _matchOrders(data);
+            _matchOrders(data[1:]);
         } else if (operationType == OperationType.MatchLiquidationOrders) {
-            _matchLiquidationOrders(data);
+            _matchLiquidationOrders(data[1:]);
         } else if (operationType == OperationType.UpdateFundingRate) {
             (uint8 productIndex, int128 priceDiff, uint128 lastFundingRateUpdateSequenceNumber) =
                 abi.decode(data[5:], (uint8, int128, uint128));

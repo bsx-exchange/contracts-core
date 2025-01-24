@@ -6,13 +6,13 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
-import {Spot} from "contracts/exchange/Spot.sol";
+import {ISpot, Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
-import {OrderLogic} from "contracts/exchange/lib/logic/OrderLogic.sol";
 import {
+    BSX_TOKEN,
     MAX_LIQUIDATION_FEE_RATE,
     MAX_MATCH_FEE_RATE,
     MAX_TAKER_SEQUENCER_FEE
@@ -69,12 +69,17 @@ contract OrderbookTest is Test {
     function test_claimSequencerFees() public {
         vm.startPrank(exchange);
 
-        int256 collectedSequencerFee = 75_000;
-        stdstore.target(address(orderbook)).sig("getSequencerFees()").checked_write_int(collectedSequencerFee);
-        assertEq(orderbook.getSequencerFees(), collectedSequencerFee);
+        IOrderBook.FeeCollection memory sequencerFees;
+        sequencerFees.inUSDC = 100 * 1e18;
+        sequencerFees.inBSX = 50 * 1e18;
+        vm.store(
+            address(orderbook),
+            bytes32(uint256(9)),
+            bytes32(abi.encodePacked(sequencerFees.inBSX, sequencerFees.inUSDC))
+        );
 
-        assertEq(orderbook.claimSequencerFees(), collectedSequencerFee);
-        assertEq(orderbook.getSequencerFees(), 0);
+        assertEq(abi.encode(orderbook.claimSequencerFees()), abi.encode(sequencerFees));
+        assertEq(abi.encode(orderbook.getSequencerFees()), abi.encode(IOrderBook.FeeCollection(0, 0)));
     }
 
     function test_claimSequencerFees_revertsWhenUnauthorized() public {
@@ -85,12 +90,15 @@ contract OrderbookTest is Test {
     function test_claimCollectedTradingFees() public {
         vm.startPrank(exchange);
 
-        int256 collectedTradingFee = 125_000;
-        stdstore.target(address(orderbook)).sig("getTradingFees()").checked_write_int(collectedTradingFee);
-        assertEq(orderbook.getTradingFees(), collectedTradingFee);
+        IOrderBook.FeeCollection memory tradingFees;
+        tradingFees.inUSDC = 100 * 1e18;
+        tradingFees.inBSX = 50 * 1e18;
+        vm.store(
+            address(orderbook), bytes32(uint256(6)), bytes32(abi.encodePacked(tradingFees.inBSX, tradingFees.inUSDC))
+        );
 
-        assertEq(orderbook.claimTradingFees(), collectedTradingFee);
-        assertEq(orderbook.getTradingFees(), 0);
+        assertEq(abi.encode(orderbook.claimTradingFees()), abi.encode(tradingFees));
+        assertEq(abi.encode(orderbook.getTradingFees()), abi.encode(IOrderBook.FeeCollection(0, 0)));
     }
 
     function test_claimCollectedTradingFee_revertsWhenUnauthorized() public {
@@ -101,33 +109,28 @@ contract OrderbookTest is Test {
     function test_matchOrders_makerGoLong() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
 
-        IOrderBook.Fee memory fee;
-        uint128 takerSequencerFee;
+        IOrderBook.Fees memory fees;
 
         vm.expectEmit(address(orderbook));
         emit IOrderBook.OrderMatched(
             productId,
             maker,
             taker,
-            makerOrder.order.orderSide,
-            makerOrder.order.nonce,
-            takerOrder.order.nonce,
+            makerOrder.orderSide,
+            makerOrder.nonce,
+            takerOrder.nonce,
             size,
             price,
-            fee,
+            fees,
             isLiquidation
         );
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
@@ -142,8 +145,10 @@ contract OrderbookTest is Test {
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
 
-        assertEq(orderbook.getSequencerFees(), 0);
-        assertEq(orderbook.getTradingFees(), 0);
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(tradingFees.inUSDC, 0);
+        assertEq(sequencerFees.inUSDC, 0);
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
@@ -151,33 +156,28 @@ contract OrderbookTest is Test {
     function test_matchOrders_makerGoShort() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createShortOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createLongOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createShortOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createLongOrder(taker, size, price, takerNonce);
 
-        IOrderBook.Fee memory fee;
-        uint128 takerSequencerFee;
+        IOrderBook.Fees memory fees;
 
         vm.expectEmit(address(orderbook));
         emit IOrderBook.OrderMatched(
             productId,
             maker,
             taker,
-            makerOrder.order.orderSide,
-            makerOrder.order.nonce,
-            takerOrder.order.nonce,
+            makerOrder.orderSide,
+            makerOrder.nonce,
+            takerOrder.nonce,
             size,
             price,
-            fee,
+            fees,
             isLiquidation
         );
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
@@ -192,8 +192,10 @@ contract OrderbookTest is Test {
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
 
-        assertEq(orderbook.getSequencerFees(), 0);
-        assertEq(orderbook.getTradingFees(), 0);
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(tradingFees.inUSDC, 0);
+        assertEq(sequencerFees.inUSDC, 0);
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
@@ -203,21 +205,17 @@ contract OrderbookTest is Test {
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
-        uint128 takerSequencerFee;
+        IOrderBook.Fees memory fees;
 
         uint128 openPositionPrice = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, openPositionPrice, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, openPositionPrice, takerNonce, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, openPositionPrice, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, openPositionPrice, takerNonce);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         uint128 closePositionPrice = 80_000 * 1e18;
-        (makerOrder, digest.maker) = _createShortOrder(maker, size, closePositionPrice, makerNonce + 1, isLiquidation);
-        (takerOrder, digest.taker) = _createLongOrder(taker, size, closePositionPrice, takerNonce + 1, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        makerOrder = _createShortOrder(maker, size, closePositionPrice, makerNonce + 1);
+        takerOrder = _createLongOrder(taker, size, closePositionPrice, takerNonce + 1);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         assertEq(abi.encode(perpEngine.getOpenPosition(maker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
         assertEq(abi.encode(perpEngine.getOpenPosition(taker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
@@ -231,23 +229,20 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         bool isLiquidation = false;
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
-        uint128 takerSequencerFee;
+
+        IOrderBook.Fees memory fees;
 
         uint128 price = 75_000 * 1e18;
 
         uint128 openSize = 5 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, openSize, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, openSize, price, takerNonce, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, openSize, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, openSize, price, takerNonce);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         uint128 closeSize = 2 * 1e18;
-        (makerOrder, digest.maker) = _createShortOrder(maker, closeSize, price, makerNonce + 1, isLiquidation);
-        (takerOrder, digest.taker) = _createLongOrder(taker, closeSize, price, takerNonce + 1, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        makerOrder = _createShortOrder(maker, closeSize, price, makerNonce + 1);
+        takerOrder = _createLongOrder(taker, closeSize, price, takerNonce + 1);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         int128 expectedBaseAmount = int128(openSize - closeSize);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
@@ -268,23 +263,20 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         bool isLiquidation = false;
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
-        uint128 takerSequencerFee;
+
+        IOrderBook.Fees memory fees;
 
         uint128 size0 = 2 * 1e18;
         uint128 price0 = 40_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size0, price0, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size0, price0, takerNonce, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size0, price0, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size0, price0, takerNonce);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         uint128 size1 = 4 * 1e18;
         uint128 price1 = 80_000 * 1e18;
-        (makerOrder, digest.maker) = _createShortOrder(maker, size1, price1, makerNonce + 1, isLiquidation);
-        (takerOrder, digest.taker) = _createLongOrder(taker, size1, price1, takerNonce + 1, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        makerOrder = _createShortOrder(maker, size1, price1, makerNonce + 1);
+        takerOrder = _createLongOrder(taker, size1, price1, takerNonce + 1);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         int128 expectedBaseAmount = int128(size1 - size0);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price1));
@@ -309,34 +301,117 @@ contract OrderbookTest is Test {
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee =
-            IOrderBook.Fee({maker: 2e14, taker: 4e14, referralRebate: 5e12, liquidationPenalty: 5e14});
-        uint128 takerSequencerFee = 1e14;
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.makerReferralRebate = 2e12;
+        fees.takerReferralRebate = 4e12;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
 
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
         assertEq(
             abi.encode(perpEngine.getOpenPosition(maker, productId)),
-            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fee.maker, 0))
+            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fees.maker, 0))
         );
         assertEq(
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
-            abi.encode(
-                IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - fee.taker - int128(takerSequencerFee), 0)
-            )
+            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - fees.taker - int128(fees.sequencer), 0))
         );
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
 
-        assertEq(orderbook.getSequencerFees(), int128(takerSequencerFee));
-        assertEq(orderbook.getTradingFees(), fee.maker + fee.taker - int128(fee.referralRebate));
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(
+            tradingFees.inUSDC,
+            fees.maker + fees.taker - int128(fees.makerReferralRebate) - int128(fees.takerReferralRebate)
+        );
+        assertEq(sequencerFees.inUSDC, int128(fees.sequencer));
+
+        assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
+    }
+
+    function test_matchOrders_withBsxFees() public {
+        vm.startPrank(exchange);
+
+        int256 initBsxBalance = 1000 ether;
+        {
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](2);
+            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
+            deltas[1] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
+            spotEngine.modifyAccount(deltas);
+        }
+
+        bool isLiquidation = true;
+        uint128 size = 2 * 1e18;
+        uint128 price = 75_000 * 1e18;
+
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.makerReferralRebate = 2e12;
+        fees.takerReferralRebate = 4e12;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
+        fees.isMakerFeeInBSX = true;
+        fees.isTakerFeeInBSX = true;
+
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+
+        vm.expectEmit(address(orderbook));
+        emit IOrderBook.OrderMatched(
+            productId,
+            maker,
+            taker,
+            makerOrder.orderSide,
+            makerOrder.nonce,
+            takerOrder.nonce,
+            size,
+            price,
+            fees,
+            isLiquidation
+        );
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+
+        int128 expectedBaseAmount = int128(size);
+        int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
+        assertEq(
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
+            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
+        );
+        assertEq(
+            abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(initBsxBalance - fees.maker))
+        );
+
+        assertEq(
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
+            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - int128(fees.liquidation), 0))
+        );
+        assertEq(
+            abi.encode(spotEngine.balance(taker, BSX_TOKEN)),
+            abi.encode(ISpot.Balance(initBsxBalance - fees.taker - int128(fees.sequencer)))
+        );
+
+        assertEq(spotEngine.getBalance(token, maker), 0);
+        assertEq(spotEngine.getBalance(token, taker), 0);
+
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(sequencerFees.inUSDC, 0);
+        assertEq(sequencerFees.inBSX, int128(fees.sequencer));
+
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        assertEq(tradingFees.inUSDC, 0);
+        assertEq(
+            tradingFees.inBSX,
+            fees.maker + fees.taker - int128(fees.makerReferralRebate) - int128(fees.takerReferralRebate)
+        );
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
@@ -348,30 +423,30 @@ contract OrderbookTest is Test {
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee =
-            IOrderBook.Fee({maker: 2e14, taker: 4e14, referralRebate: 5e12, liquidationPenalty: 5e14});
-        uint128 takerSequencerFee = 1e14;
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.makerReferralRebate = 2e12;
+        fees.takerReferralRebate = 4e12;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
 
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, !isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         int128 expectedBaseAmount = int128(size);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
-        uint128 liquidationFee = fee.liquidationPenalty;
         assertEq(
             abi.encode(perpEngine.getOpenPosition(maker, productId)),
-            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fee.maker, 0))
+            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fees.maker, 0))
         );
         assertEq(
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(
                 IPerp.Balance(
                     -expectedBaseAmount,
-                    expectedQuoteAmount - fee.taker - int128(takerSequencerFee) - int128(liquidationFee),
+                    expectedQuoteAmount - fees.taker - int128(fees.sequencer) - int128(fees.liquidation),
                     0
                 )
             )
@@ -379,9 +454,15 @@ contract OrderbookTest is Test {
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
 
-        assertEq(orderbook.getSequencerFees(), int128(takerSequencerFee));
-        assertEq(orderbook.getTradingFees(), fee.maker + fee.taker - int128(fee.referralRebate));
-        assertEq(clearingService.getInsuranceFundBalance(), liquidationFee);
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(sequencerFees.inUSDC, int128(fees.sequencer));
+
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        assertEq(
+            tradingFees.inUSDC,
+            fees.maker + fees.taker - int128(fees.makerReferralRebate) - int128(fees.takerReferralRebate)
+        );
+        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
@@ -395,115 +476,95 @@ contract OrderbookTest is Test {
 
         assertEq(MAX_LIQUIDATION_FEE_RATE, (10 * uint256(Percentage.ONE_HUNDRED_PERCENT)) / 100);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee = IOrderBook.Fee({
-            maker: 2e14,
-            taker: 4e14,
-            referralRebate: 5e12,
-            liquidationPenalty: size.mul18D(price).calculatePercentage(MAX_LIQUIDATION_FEE_RATE) + 1
-        });
-        uint128 takerSequencerFee = 1e14;
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.makerReferralRebate = 2e12;
+        fees.takerReferralRebate = 4e12;
+        fees.sequencer = 1e14;
+        fees.liquidation = size.mul18D(price).calculatePercentage(MAX_LIQUIDATION_FEE_RATE) + 1;
 
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, !isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
 
         vm.expectRevert(Errors.Orderbook_ExceededMaxLiquidationFee.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsWhenUnauthorized() public {
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
 
         vm.expectRevert(Errors.Unauthorized.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsWhenSameAccount() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         address account = makeAddr("account");
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(account, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(account, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(account, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(account, size, price, takerNonce);
 
         vm.expectRevert(Errors.Orderbook_OrdersWithSameAccounts.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsWhenSameSide() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
 
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createLongOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createLongOrder(taker, size, price, takerNonce);
         vm.expectRevert(Errors.Orderbook_OrdersWithSameSides.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
-        (makerOrder, digest.maker) = _createShortOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
+        makerOrder = _createShortOrder(maker, size, price, makerNonce);
+        takerOrder = _createShortOrder(taker, size, price, takerNonce);
         vm.expectRevert(Errors.Orderbook_OrdersWithSameSides.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsWhenNonceUsed() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory fulfilledMakerOrder;
-        OrderLogic.SignedOrder memory fulfilledTakerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (fulfilledMakerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (fulfilledTakerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
-        orderbook.matchOrders(fulfilledMakerOrder, fulfilledTakerOrder, digest, productId, 0, fee);
+        IOrderBook.Order memory fulfilledMakerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory fulfilledTakerOrder = _createShortOrder(taker, size, price, takerNonce);
+        orderbook.matchOrders(productId, fulfilledMakerOrder, fulfilledTakerOrder, fees, isLiquidation);
 
-        OrderLogic.SignedOrder memory newTakerOrder;
-        (newTakerOrder, digest.taker) = _createShortOrder(taker, size, price, makerNonce + 1, isLiquidation);
+        IOrderBook.Order memory newTakerOrder = _createShortOrder(taker, size, price, takerNonce + 1);
         vm.expectRevert(abi.encodeWithSelector(Errors.Orderbook_NonceUsed.selector, maker, makerNonce));
-        orderbook.matchOrders(fulfilledMakerOrder, newTakerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, fulfilledMakerOrder, newTakerOrder, fees, isLiquidation);
 
-        OrderLogic.SignedOrder memory newMakerOrder;
-        (newMakerOrder, digest.maker) = _createLongOrder(maker, size, price, takerNonce + 1, isLiquidation);
+        IOrderBook.Order memory newMakerOrder = _createLongOrder(maker, size, price, makerNonce + 1);
         vm.expectRevert(abi.encodeWithSelector(Errors.Orderbook_NonceUsed.selector, taker, takerNonce));
-        orderbook.matchOrders(newMakerOrder, fulfilledTakerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, newMakerOrder, fulfilledTakerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsIfInvalidPrice() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         bool isLiquidation = false;
         uint128 size = 5 * 1e18;
@@ -511,99 +572,91 @@ contract OrderbookTest is Test {
 
         uint128 makerPrice = price;
         uint128 takerPrice = price + 1;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, makerPrice, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, takerPrice, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, makerPrice, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, takerPrice, takerNonce);
         vm.expectRevert(Errors.Orderbook_InvalidOrderPrice.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         makerPrice = price;
         takerPrice = price - 1;
-        (makerOrder, digest.maker) = _createShortOrder(maker, size, makerPrice, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createLongOrder(taker, size, takerPrice, takerNonce, isLiquidation);
+        makerOrder = _createShortOrder(maker, size, makerPrice, makerNonce);
+        takerOrder = _createLongOrder(taker, size, takerPrice, takerNonce);
         vm.expectRevert(Errors.Orderbook_InvalidOrderPrice.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsIfExceededMaxTradingFees() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-
         bool isLiquidation = false;
         uint128 size = 5 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
 
         uint128 matchedQuoteAmount = size.mul18D(price);
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         assertEq(MAX_MATCH_FEE_RATE, (2 * uint256(Percentage.ONE_HUNDRED_PERCENT)) / 100);
 
-        fee.maker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE) + 1);
+        fees.maker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE) + 1);
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
-        fee.maker = 0;
-        fee.taker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE)) + 1;
+        fees.maker = 0;
+        fees.taker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE)) + 1;
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, 0, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
     function test_matchOrders_revertsIfExceededMaxSequencerFees() public {
         vm.startPrank(exchange);
 
-        OrderLogic.SignedOrder memory makerOrder;
-        OrderLogic.SignedOrder memory takerOrder;
-        IOrderBook.OrderHash memory digest;
-        IOrderBook.Fee memory fee;
+        IOrderBook.Fees memory fees;
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
         uint128 price = 75_000 * 1e18;
-        (makerOrder, digest.maker) = _createLongOrder(maker, size, price, makerNonce, isLiquidation);
-        (takerOrder, digest.taker) = _createShortOrder(taker, size, price, takerNonce, isLiquidation);
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
 
-        uint128 takerSequencerFee = MAX_TAKER_SEQUENCER_FEE + 1;
+        fees.sequencer = MAX_TAKER_SEQUENCER_FEE + 1;
+
         vm.expectRevert(Errors.Orderbook_ExceededMaxSequencerFee.selector);
-        orderbook.matchOrders(makerOrder, takerOrder, digest, productId, takerSequencerFee, fee);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
-    function _createLongOrder(address account, uint128 size, uint128 price, uint64 nonce, bool isLiquidation)
+    function _createLongOrder(address account, uint128 size, uint128 price, uint64 nonce)
         internal
         view
-        returns (OrderLogic.SignedOrder memory signedOrder, bytes32 orderHash)
+        returns (IOrderBook.Order memory)
     {
-        OrderLogic.Order memory order = OrderLogic.Order({
+        bytes32 orderHash = keccak256(abi.encode(account, size, price, nonce, IOrderBook.OrderSide.SELL));
+        return IOrderBook.Order({
+            productIndex: productId,
             sender: account,
             size: size,
             price: price,
             nonce: nonce,
-            productIndex: productId,
-            orderSide: OrderLogic.OrderSide.BUY
+            orderSide: IOrderBook.OrderSide.BUY,
+            orderHash: orderHash
         });
-        signedOrder =
-            OrderLogic.SignedOrder({order: order, signature: "", signer: account, isLiquidation: isLiquidation});
-        orderHash = keccak256(abi.encode(account, size, price, nonce, OrderLogic.OrderSide.BUY));
     }
 
-    function _createShortOrder(address account, uint128 size, uint128 price, uint64 nonce, bool isLiquidation)
+    function _createShortOrder(address account, uint128 size, uint128 price, uint64 nonce)
         internal
         view
-        returns (OrderLogic.SignedOrder memory signedOrder, bytes32 orderHash)
+        returns (IOrderBook.Order memory)
     {
-        OrderLogic.Order memory order = OrderLogic.Order({
+        bytes32 orderHash = keccak256(abi.encode(account, size, price, nonce, IOrderBook.OrderSide.SELL));
+        return IOrderBook.Order({
+            productIndex: productId,
             sender: account,
             size: size,
             price: price,
             nonce: nonce,
-            productIndex: productId,
-            orderSide: OrderLogic.OrderSide.SELL
+            orderSide: IOrderBook.OrderSide.SELL,
+            orderHash: orderHash
         });
-        signedOrder =
-            OrderLogic.SignedOrder({order: order, signature: "", signer: account, isLiquidation: isLiquidation});
-        orderHash = keccak256(abi.encode(account, size, price, nonce, OrderLogic.OrderSide.SELL));
     }
 }

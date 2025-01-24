@@ -11,8 +11,7 @@ import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {OrderLogic} from "./lib/logic/OrderLogic.sol";
-import {MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEE_RATE, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
+import {BSX_TOKEN, MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEE_RATE, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
 
 /// @title Orderbook contract
 /// @notice This contract is used for matching orders
@@ -31,10 +30,10 @@ contract OrderBook is IOrderBook, Initializable {
     mapping(bytes32 orderHash => uint128 filledAmount) public filled;
     mapping(address account => mapping(uint64 nonce => bool used)) public isNonceUsed;
 
-    FeeCollection public feeCollection;
+    FeeCollection private _tradingFees;
     mapping(uint8 productId => int256 fee) private _sequencerFee; //deprecated
-    address private collateralToken;
-    int256 private totalSequencerFee;
+    address private _collateralToken;
+    FeeCollection private _sequencerFees;
 
     // function initialize(
     //     address _clearingService,
@@ -66,34 +65,34 @@ contract OrderBook is IOrderBook, Initializable {
     /// @inheritdoc IOrderBook
     // solhint-disable code-complexity
     function matchOrders(
-        OrderLogic.SignedOrder calldata maker,
-        OrderLogic.SignedOrder calldata taker,
-        OrderHash calldata digest,
         uint8 productIndex,
-        uint128 takerSequencerFee,
-        Fee calldata matchFee
+        Order calldata maker,
+        Order calldata taker,
+        Fees calldata fees,
+        bool isLiquidation
     ) external onlySequencer {
-        if (maker.order.orderSide == taker.order.orderSide) {
+        if (maker.orderSide == taker.orderSide) {
             revert Errors.Orderbook_OrdersWithSameSides();
         }
-        if (maker.order.sender == taker.order.sender) {
+        if (maker.sender == taker.sender) {
             revert Errors.Orderbook_OrdersWithSameAccounts();
         }
-        if (takerSequencerFee > MAX_TAKER_SEQUENCER_FEE) {
+
+        // TODO add validation for fee in BSX
+        if (!fees.isTakerFeeInBSX && fees.sequencer > MAX_TAKER_SEQUENCER_FEE) {
             revert Errors.Orderbook_ExceededMaxSequencerFee();
         }
 
-        uint128 fillAmount =
-            MathHelper.min(maker.order.size - filled[digest.maker], taker.order.size - filled[digest.taker]);
-        _verifyUsedNonce(maker.order.sender, maker.order.nonce);
-        _verifyUsedNonce(taker.order.sender, taker.order.nonce);
+        uint128 fillAmount = MathHelper.min(maker.size - filled[maker.orderHash], taker.size - filled[taker.orderHash]);
+        _verifyUsedNonce(maker.sender, maker.nonce);
+        _verifyUsedNonce(taker.sender, taker.nonce);
 
-        _validatePrice(maker.order.orderSide, maker.order.price, taker.order.price);
-        uint128 price = maker.order.price;
+        _validatePrice(maker.orderSide, maker.price, taker.price);
+        uint128 price = maker.price;
 
         Delta memory takerDelta;
         Delta memory makerDelta;
-        if (taker.order.orderSide == OrderLogic.OrderSide.SELL) {
+        if (taker.orderSide == OrderSide.SELL) {
             takerDelta.productAmount = -fillAmount.safeInt128();
             makerDelta.productAmount = fillAmount.safeInt128();
             takerDelta.quoteAmount = price.mul18D(fillAmount).safeInt128();
@@ -104,100 +103,93 @@ contract OrderBook is IOrderBook, Initializable {
             makerDelta.quoteAmount = price.mul18D(fillAmount).safeInt128();
             takerDelta.quoteAmount = -makerDelta.quoteAmount;
         }
+
+        // TODO add validation for fee in BSX
         if (
-            matchFee.maker > makerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
-                || matchFee.taker > takerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
+            !fees.isMakerFeeInBSX
+                && fees.maker > makerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
+        ) {
+            revert Errors.Orderbook_ExceededMaxTradingFee();
+        }
+        if (
+            !fees.isTakerFeeInBSX
+                && fees.taker > takerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
         ) {
             revert Errors.Orderbook_ExceededMaxTradingFee();
         }
 
-        if (taker.isLiquidation) {
-            uint128 liquidationFee = matchFee.liquidationPenalty;
-            uint128 maxLiquidationFee = takerDelta.quoteAmount.abs().calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
+        FeesInBSX memory feesInBSX;
 
-            if (liquidationFee > maxLiquidationFee) {
-                revert Errors.Orderbook_ExceededMaxLiquidationFee();
-            }
-
-            takerDelta.quoteAmount -= liquidationFee.safeInt128();
-            clearingService.collectLiquidationFee(taker.order.sender, taker.order.nonce, liquidationFee);
+        if (isLiquidation) {
+            _collectLiquidationFee(fees.liquidation, taker, takerDelta);
         }
 
-        makerDelta.quoteAmount = makerDelta.quoteAmount - matchFee.maker;
-        takerDelta.quoteAmount = takerDelta.quoteAmount - matchFee.taker;
-        _updateFeeCollection(matchFee);
+        _collectTradingFees(fees, makerDelta, takerDelta, feesInBSX);
 
-        //sequencer fee application
-        if (filled[digest.taker] == 0) {
-            totalSequencerFee += takerSequencerFee.safeInt128();
-            takerDelta.quoteAmount -= takerSequencerFee.safeInt128();
+        if (filled[taker.orderHash] == 0) {
+            _collectSequencerFee(fees.sequencer.safeInt128(), fees.isTakerFeeInBSX, takerDelta, feesInBSX);
         }
 
-        filled[digest.maker] += fillAmount;
-        filled[digest.taker] += fillAmount;
-        if (maker.order.size == filled[digest.maker]) {
-            isNonceUsed[maker.order.sender][maker.order.nonce] = true;
+        _collectFeesInBSX(feesInBSX, maker.sender, taker.sender);
+
+        filled[maker.orderHash] += fillAmount;
+        filled[taker.orderHash] += fillAmount;
+        if (maker.size == filled[maker.orderHash]) {
+            isNonceUsed[maker.sender][maker.nonce] = true;
         }
-        if (taker.order.size == filled[digest.taker]) {
-            isNonceUsed[taker.order.sender][taker.order.nonce] = true;
+        if (taker.size == filled[taker.orderHash]) {
+            isNonceUsed[taker.sender][taker.nonce] = true;
         }
         (makerDelta.quoteAmount, makerDelta.productAmount) =
-            _settleBalance(productIndex, maker.order.sender, makerDelta.productAmount, makerDelta.quoteAmount, price);
+            _settleBalance(productIndex, maker.sender, makerDelta.productAmount, makerDelta.quoteAmount, price);
 
         //handle taker position settle
         (takerDelta.quoteAmount, takerDelta.productAmount) =
-            _settleBalance(productIndex, taker.order.sender, takerDelta.productAmount, takerDelta.quoteAmount, price);
+            _settleBalance(productIndex, taker.sender, takerDelta.productAmount, takerDelta.quoteAmount, price);
 
-        {
-            IPerp.AccountDelta[] memory productDeltas = new IPerp.AccountDelta[](2);
+        _updatePerpAccounts(productIndex, maker, taker, makerDelta, takerDelta);
 
-            productDeltas[0] =
-                _createAccountDelta(productIndex, maker.order.sender, makerDelta.productAmount, makerDelta.quoteAmount);
-            productDeltas[1] =
-                _createAccountDelta(productIndex, taker.order.sender, takerDelta.productAmount, takerDelta.quoteAmount);
-
-            _modifyAccounts(productDeltas);
-        }
-        bool isLiquidation = taker.isLiquidation;
         emit OrderMatched(
             productIndex,
-            maker.order.sender,
-            taker.order.sender,
-            maker.order.orderSide,
-            maker.order.nonce,
-            taker.order.nonce,
+            maker.sender,
+            taker.sender,
+            maker.orderSide,
+            maker.nonce,
+            taker.nonce,
             fillAmount,
             price,
-            matchFee,
+            fees,
             isLiquidation
         );
     }
 
     /// @inheritdoc IOrderBook
-    function claimTradingFees() external onlySequencer returns (int256 totalFees) {
-        totalFees = feeCollection.perpFeeCollection;
-        feeCollection.perpFeeCollection = 0;
+    function claimTradingFees() external onlySequencer returns (FeeCollection memory) {
+        FeeCollection memory tradingFees = _tradingFees;
+        delete _tradingFees;
+        return tradingFees;
     }
 
     /// @inheritdoc IOrderBook
-    function claimSequencerFees() external onlySequencer returns (int256 totalFees) {
-        totalFees = totalSequencerFee;
-        totalSequencerFee = 0;
+    function claimSequencerFees() external onlySequencer returns (FeeCollection memory) {
+        FeeCollection memory sequencerFees = _sequencerFees;
+        delete _sequencerFees;
+        return sequencerFees;
     }
 
     /// @inheritdoc IOrderBook
     function getCollateralToken() external view returns (address) {
-        return collateralToken;
+        return _collateralToken;
     }
 
     /// @inheritdoc IOrderBook
-    function getTradingFees() external view returns (int128) {
-        return feeCollection.perpFeeCollection;
+    function getTradingFees() external view returns (FeeCollection memory) {
+        return _tradingFees;
     }
 
     /// @inheritdoc IOrderBook
-    function getSequencerFees() external view returns (int256) {
-        return totalSequencerFee;
+    function getSequencerFees() external view returns (FeeCollection memory) {
+        return _sequencerFees;
     }
 
     /// @inheritdoc IOrderBook
@@ -213,8 +205,71 @@ contract OrderBook is IOrderBook, Initializable {
         perpEngine.modifyAccount(_accountDeltas);
     }
 
-    function _updateFeeCollection(Fee calldata fee) internal {
-        feeCollection.perpFeeCollection += fee.maker + fee.taker - fee.referralRebate.safeInt128();
+    function _collectLiquidationFee(uint128 liquidationFee, Order memory taker, Delta memory takerDelta) internal {
+        uint128 maxLiquidationFee = takerDelta.quoteAmount.abs().calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
+
+        if (liquidationFee > maxLiquidationFee) {
+            revert Errors.Orderbook_ExceededMaxLiquidationFee();
+        }
+
+        takerDelta.quoteAmount -= liquidationFee.safeInt128();
+        clearingService.collectLiquidationFee(taker.sender, taker.nonce, liquidationFee);
+    }
+
+    function _collectTradingFees(
+        Fees calldata fees,
+        Delta memory makerDelta,
+        Delta memory takerDelta,
+        FeesInBSX memory feesInBSX
+    ) internal {
+        int128 makerTradingFee = fees.maker - fees.makerReferralRebate.safeInt128();
+        if (fees.isMakerFeeInBSX) {
+            feesInBSX.maker += fees.maker;
+            _tradingFees.inBSX += makerTradingFee;
+        } else {
+            makerDelta.quoteAmount -= fees.maker;
+            _tradingFees.inUSDC += makerTradingFee;
+        }
+
+        int128 takerTradingFee = fees.taker - fees.takerReferralRebate.safeInt128();
+        if (fees.isTakerFeeInBSX) {
+            feesInBSX.taker += fees.taker;
+            _tradingFees.inBSX += takerTradingFee;
+        } else {
+            takerDelta.quoteAmount -= fees.taker;
+            _tradingFees.inUSDC += takerTradingFee;
+        }
+    }
+
+    function _collectSequencerFee(
+        int128 sequencerFee,
+        bool isTakerFeeInBSX,
+        Delta memory takerDelta,
+        FeesInBSX memory feesInBSX
+    ) internal {
+        if (isTakerFeeInBSX) {
+            _sequencerFees.inBSX += sequencerFee;
+            feesInBSX.taker += sequencerFee;
+        } else {
+            _sequencerFees.inUSDC += sequencerFee;
+            takerDelta.quoteAmount -= sequencerFee;
+        }
+    }
+
+    function _collectFeesInBSX(FeesInBSX memory feesInBSX, address maker, address taker) internal {
+        ISpot.AccountDelta[] memory accountDeltas;
+        if (feesInBSX.maker > 0 && feesInBSX.taker > 0) {
+            accountDeltas = new ISpot.AccountDelta[](2);
+            accountDeltas[0] = ISpot.AccountDelta(BSX_TOKEN, maker, -feesInBSX.maker);
+            accountDeltas[1] = ISpot.AccountDelta(BSX_TOKEN, taker, -feesInBSX.taker);
+        } else if (feesInBSX.maker > 0) {
+            accountDeltas = new ISpot.AccountDelta[](1);
+            accountDeltas[0] = ISpot.AccountDelta(BSX_TOKEN, maker, -feesInBSX.maker);
+        } else if (feesInBSX.taker > 0) {
+            accountDeltas = new ISpot.AccountDelta[](1);
+            accountDeltas[0] = ISpot.AccountDelta(BSX_TOKEN, taker, -feesInBSX.taker);
+        }
+        spotEngine.modifyAccount(accountDeltas);
     }
 
     function _settleBalance(uint8 _productIndex, address _account, int128 _matchSize, int128 _quote, uint128 _price)
@@ -235,17 +290,32 @@ contract OrderBook is IOrderBook, Initializable {
         } else if (newSize == 0) {
             amountToSettle = newQuote;
         }
-        accountDeltas[0] = ISpot.AccountDelta(collateralToken, _account, amountToSettle);
+        accountDeltas[0] = ISpot.AccountDelta(_collateralToken, _account, amountToSettle);
         spotEngine.modifyAccount(accountDeltas);
         newQuote = newQuote - amountToSettle;
         return (newQuote, newSize);
     }
 
-    function _validatePrice(OrderLogic.OrderSide makerSide, uint128 makerPrice, uint128 takerPrice) internal pure {
-        if (makerSide == OrderLogic.OrderSide.BUY && makerPrice < takerPrice) {
+    function _updatePerpAccounts(
+        uint8 _productIndex,
+        Order memory maker,
+        Order memory taker,
+        Delta memory makerDelta,
+        Delta memory takerDelta
+    ) internal {
+        IPerp.AccountDelta[] memory accountDeltas = new IPerp.AccountDelta[](2);
+        accountDeltas[0] =
+            _createAccountDelta(_productIndex, maker.sender, makerDelta.productAmount, makerDelta.quoteAmount);
+        accountDeltas[1] =
+            _createAccountDelta(_productIndex, taker.sender, takerDelta.productAmount, takerDelta.quoteAmount);
+        _modifyAccounts(accountDeltas);
+    }
+
+    function _validatePrice(OrderSide makerSide, uint128 makerPrice, uint128 takerPrice) internal pure {
+        if (makerSide == OrderSide.BUY && makerPrice < takerPrice) {
             revert Errors.Orderbook_InvalidOrderPrice();
         }
-        if (makerSide == OrderLogic.OrderSide.SELL && makerPrice > takerPrice) {
+        if (makerSide == OrderSide.SELL && makerPrice > takerPrice) {
             revert Errors.Orderbook_InvalidOrderPrice();
         }
     }
