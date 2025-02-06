@@ -203,6 +203,13 @@ contract BalanceExchangeTest is Test {
         exchange.deposit(address(collateralToken), 100);
     }
 
+    function test_deposit_revertsIfRecipientIsVault() public {
+        address vault = _registerVault();
+
+        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+        exchange.deposit(vault, address(collateralToken), 100);
+    }
+
     function test_deposit_withRecipient() public {
         address payer = makeAddr("payer");
         address recipient = makeAddr("recipient");
@@ -438,6 +445,13 @@ contract BalanceExchangeTest is Test {
         exchange.depositWithAuthorization(notSupportedToken, makeAddr("account"), 100, 0, 0, 0, "");
     }
 
+    function test_depositWithAuthorization_revertsIfRecipientIsVault() public {
+        address vault = _registerVault();
+
+        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+        exchange.depositWithAuthorization(address(collateralToken), vault, 100, 0, 0, 0, bytes(""));
+    }
+
     function test_depositWithAuthorization_revertsIfDisabledDeposit() public {
         vm.startPrank(sequencer);
         exchange.setCanDeposit(false);
@@ -580,6 +594,23 @@ contract BalanceExchangeTest is Test {
             collateralToken.balanceOf(address(bsx1000)),
             bsx1000BalanceBefore + transferAmount.convertFrom18D(tokenDecimals)
         );
+    }
+
+    function test_processBatch_transferToBSX1000_revertsIfAccountIsVault() public {
+        address vault = _registerVault();
+        uint128 amount = 300 * 1e18;
+        uint64 nonce = 1;
+        bytes memory signature;
+
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.TransferToBSX1000,
+            abi.encode(IExchange.TransferToBSX1000Params(vault, address(collateralToken), amount, nonce, signature))
+        );
+
+        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+
+        vm.startPrank(sequencer);
+        exchange.processBatch(operation.toArray());
     }
 
     function test_processBatch_transferToBSX1000_revertsIfNonceUsed() public {
@@ -906,6 +937,25 @@ contract BalanceExchangeTest is Test {
             collateralToken.balanceOf(address(exchange)),
             exchangeBalanceBefore - netAmount.convertFrom18D(tokenDecimals)
         );
+    }
+
+    function test_processBatch_withdraw_revertsIfRecipientIsVault() public {
+        address vault = _registerVault();
+        uint128 amount = 300 * 1e18;
+        uint64 nonce = 1;
+        uint128 withdrawFee = 1 * 1e16;
+        bytes memory signature;
+
+        // deposit to vault
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.Withdraw,
+            abi.encode(IExchange.Withdraw(vault, address(collateralToken), amount, nonce, signature, withdrawFee))
+        );
+
+        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
     }
 
     function test_processBatch_withdraw_notUnderlyingToken() public {
@@ -1268,15 +1318,21 @@ contract BalanceExchangeTest is Test {
         return abi.encodePacked(operationType, transactionId, data);
     }
 
-    function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory signature) {
-        (, string memory name, string memory version, uint256 chainId, address verifyingContract,,) =
-            exchange.eip712Domain();
-        bytes32 domainSeparator = keccak256(
-            abi.encode(TYPE_HASH, keccak256(bytes(name)), keccak256(bytes(version)), chainId, verifyingContract)
-        );
-        bytes32 digest = MessageHashUtils.toTypedDataHash(domainSeparator, structHash);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
-        signature = abi.encodePacked(r, s, v);
+    function _registerVault() private returns (address) {
+        (address vault, uint256 vaultPrivKey) = makeAddrAndKey("vault");
+        address feeRecipient = makeAddr("feeRecipient");
+        uint256 profitShareBps = 100;
+        bytes32 REGISTER_VAULT_TYPEHASH =
+            keccak256("RegisterVault(address vault,address feeRecipient,uint256 profitShareBps)");
+        bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
+        vm.prank(sequencer);
+        exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
+        return vault;
+    }
+
+    function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory) {
+        return Helper.signTypedDataHash(exchange, privateKey, structHash);
     }
 
     function _maxZeroScaledAmount() private view returns (uint128) {

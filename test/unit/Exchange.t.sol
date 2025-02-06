@@ -36,6 +36,7 @@ contract ExchangeTest is Test {
     OrderBook private orderbook;
     Perp private perpEngine;
     Spot private spotEngine;
+    VaultManager private vaultManager;
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
@@ -77,7 +78,7 @@ contract ExchangeTest is Test {
         access.setOrderBook(address(orderbook));
         access.setSpotEngine(address(spotEngine));
 
-        VaultManager vaultManager = new VaultManager();
+        vaultManager = new VaultManager();
         stdstore.target(address(vaultManager)).sig("access()").checked_write(address(access));
         access.setVaultManager(address(vaultManager));
 
@@ -624,6 +625,74 @@ contract ExchangeTest is Test {
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
         );
         exchange.unregisterSigningWallet(address(0x12), address(0x34));
+    }
+
+    function test_coverLoss_succeed() public {
+        address account = makeAddr("account");
+        uint128 loss = 5 * 1e18;
+        address payer = makeAddr("payer");
+        uint128 payerBalance = 10 * 1e18;
+
+        {
+            vm.startPrank(address(exchange));
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: -int128(loss)});
+            spotEngine.modifyAccount(deltas);
+
+            clearingService.deposit(payer, payerBalance, address(collateralToken));
+            vm.stopPrank();
+        }
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.CoverLoss(account, payer, address(collateralToken), loss);
+
+        vm.prank(address(vaultManager));
+        exchange.coverLoss(account, payer, address(collateralToken));
+
+        assertEq(spotEngine.getBalance(address(collateralToken), account), 0);
+        assertEq(spotEngine.getBalance(address(collateralToken), payer), int128(payerBalance - loss));
+    }
+
+    function test_coverLoss_revertsIfUnauthorized() public {
+        address account = makeAddr("account");
+        address payer = makeAddr("payer");
+
+        vm.expectRevert(Errors.Unauthorized.selector);
+        exchange.coverLoss(account, payer, address(collateralToken));
+    }
+
+    function test_coverLoss_revertsIfAccountNoLoss() public {
+        address account = makeAddr("account");
+        address payer = makeAddr("payer");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Errors.Exchange_AccountNoLoss.selector, account, address(collateralToken))
+        );
+
+        vm.prank(address(vaultManager));
+        exchange.coverLoss(account, payer, address(collateralToken));
+    }
+
+    function test_coverLoss_revertsIfPayerInsufficientBalance() public {
+        address account = makeAddr("account");
+        uint128 loss = 5 * 1e18;
+        address payer = makeAddr("payer");
+
+        {
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: -int128(loss)});
+            vm.prank(address(exchange));
+            spotEngine.modifyAccount(deltas);
+        }
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.Exchange_AccountInsufficientBalance.selector, payer, address(collateralToken), 0, loss
+            )
+        );
+
+        vm.prank(address(vaultManager));
+        exchange.coverLoss(account, payer, address(collateralToken));
     }
 
     function test_claimCollectedTradingFees() public {

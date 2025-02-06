@@ -594,6 +594,9 @@ contract VaultManagerTest is Test {
         vm.prank(address(clearingService));
         spotEngine.modifyAccount(accounts);
 
+        uint256 anyShare = 10 ether;
+        assertEq(vaultManager.convertToAssets(vault, anyShare), 0);
+
         uint256 nonce = 456;
         uint256 stakeAmount = 80 ether;
 
@@ -715,6 +718,7 @@ contract VaultManagerTest is Test {
         uint256 expectedShares = 60 ether;
         uint256 expectedFee = 0;
         assertEq(vaultManager.convertToShares(vault, unstakeAmount), expectedShares);
+        assertEq(vaultManager.convertToAssets(vault, expectedShares), unstakeAmount);
 
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
         signature = _signTypedData(stakerPrivKey, structHash);

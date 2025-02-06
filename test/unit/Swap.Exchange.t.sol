@@ -5,6 +5,7 @@ import {IAccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
+import {Helper} from "../Helper.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
 import {UniversalRouter} from "../mock/UniversalRouter.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
@@ -288,7 +289,17 @@ contract SwapExchangeTest is Test {
         exchange.innerSwapWithPermit(emptyParams);
     }
 
-    function test_innerSwapWithPermit_reverIfInvalidSigner() public {
+    function test_innerSwapWithPermit_revertIfAccountIsVault() public {
+        address vault = _registerVault();
+        ISwap.SwapParams memory params;
+        params.account = vault;
+
+        vm.prank(address(exchange));
+        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+        exchange.innerSwapWithPermit(params);
+    }
+
+    function test_innerSwapWithPermit_revertIfInvalidSigner() public {
         (, uint256 maliciousSignerKey) = makeAddrAndKey("maliciousSigner");
 
         ISwap.SwapParams memory params;
@@ -650,14 +661,20 @@ contract SwapExchangeTest is Test {
         exchange.innerSwapWithPermit(params);
     }
 
-    function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory signature) {
-        (, string memory name, string memory version, uint256 chainId, address verifyingContract,,) =
-            exchange.eip712Domain();
-        bytes32 domainSeparator = keccak256(
-            abi.encode(TYPE_HASH, keccak256(bytes(name)), keccak256(bytes(version)), chainId, verifyingContract)
-        );
-        bytes32 digest = MessageHashUtils.toTypedDataHash(domainSeparator, structHash);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
-        signature = abi.encodePacked(r, s, v);
+    function _registerVault() private returns (address) {
+        (address vault, uint256 vaultPrivKey) = makeAddrAndKey("vault");
+        address feeRecipient = makeAddr("feeRecipient");
+        uint256 profitShareBps = 100;
+        bytes32 REGISTER_VAULT_TYPEHASH =
+            keccak256("RegisterVault(address vault,address feeRecipient,uint256 profitShareBps)");
+        bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
+        vm.prank(sequencer);
+        exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
+        return vault;
+    }
+
+    function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory) {
+        return Helper.signTypedDataHash(exchange, privateKey, structHash);
     }
 }
