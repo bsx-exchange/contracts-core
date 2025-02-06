@@ -50,10 +50,10 @@ contract VaultManager is IVaultManager, Initializable {
         _;
     }
 
-    function initialize(address _access, address _asset) external initializer {
-        access = Access(_access);
-        asset = _asset;
-    }
+    // function initialize(address _access, address _asset) external initializer {
+    //     access = Access(_access);
+    //     asset = _asset;
+    // }
 
     /// @inheritdoc IVaultManager
     function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes memory signature)
