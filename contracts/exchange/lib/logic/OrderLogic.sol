@@ -282,8 +282,6 @@ library OrderLogic {
 
         (from, to) = _getDataIndexRange(DataType.IsTakerFeeInBSX);
         wrappedData.fees.isTakerFeeInBSX = uint8(data[from]) != 0;
-
-        return wrappedData;
     }
 
     /// @dev Parse encoded data to order

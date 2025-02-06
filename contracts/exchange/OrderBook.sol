@@ -164,17 +164,15 @@ contract OrderBook is IOrderBook, Initializable {
     }
 
     /// @inheritdoc IOrderBook
-    function claimTradingFees() external onlySequencer returns (FeeCollection memory) {
-        FeeCollection memory tradingFees = _tradingFees;
+    function claimTradingFees() external onlySequencer returns (FeeCollection memory tradingFees) {
+        tradingFees = _tradingFees;
         delete _tradingFees;
-        return tradingFees;
     }
 
     /// @inheritdoc IOrderBook
-    function claimSequencerFees() external onlySequencer returns (FeeCollection memory) {
-        FeeCollection memory sequencerFees = _sequencerFees;
+    function claimSequencerFees() external onlySequencer returns (FeeCollection memory sequencerFees) {
+        sequencerFees = _sequencerFees;
         delete _sequencerFees;
-        return sequencerFees;
     }
 
     /// @inheritdoc IOrderBook

@@ -387,12 +387,14 @@ contract OrderbookTest is Test {
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
         );
         assertEq(
-            abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(initBsxBalance - fees.maker))
-        );
-
-        assertEq(
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - int128(fees.liquidation), 0))
+        );
+
+        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+
+        assertEq(
+            abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(initBsxBalance - fees.maker))
         );
         assertEq(
             abi.encode(spotEngine.balance(taker, BSX_TOKEN)),
@@ -412,6 +414,161 @@ contract OrderbookTest is Test {
             tradingFees.inBSX,
             fees.maker + fees.taker - int128(fees.makerReferralRebate) - int128(fees.takerReferralRebate)
         );
+
+        assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
+    }
+
+    function test_matchOrders_onlyMakerFeesInBsx() public {
+        vm.startPrank(exchange);
+
+        int256 initBsxBalance = 1000 ether;
+        {
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
+            spotEngine.modifyAccount(deltas);
+        }
+
+        bool isLiquidation = true;
+        uint128 size = 2 * 1e18;
+        uint128 price = 75_000 * 1e18;
+
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.makerReferralRebate = 2e12;
+        fees.takerReferralRebate = 4e12;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
+        fees.isMakerFeeInBSX = true;
+        fees.isTakerFeeInBSX = false;
+
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+
+        vm.expectEmit(address(orderbook));
+        emit IOrderBook.OrderMatched(
+            productId,
+            maker,
+            taker,
+            makerOrder.orderSide,
+            makerOrder.nonce,
+            takerOrder.nonce,
+            size,
+            price,
+            fees,
+            isLiquidation
+        );
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+
+        int128 expectedBaseAmount = int128(size);
+        int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
+        assertEq(
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
+            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
+        );
+        assertEq(
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
+            abi.encode(
+                IPerp.Balance(
+                    -expectedBaseAmount,
+                    expectedQuoteAmount - int128(fees.liquidation) - int128(fees.sequencer) - fees.taker,
+                    0
+                )
+            )
+        );
+
+        assertEq(
+            abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(initBsxBalance - fees.maker))
+        );
+        assertEq(abi.encode(spotEngine.balance(taker, BSX_TOKEN)), abi.encode(ISpot.Balance(0)));
+
+        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+
+        assertEq(spotEngine.getBalance(token, maker), 0);
+        assertEq(spotEngine.getBalance(token, taker), 0);
+
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(sequencerFees.inUSDC, int128(fees.sequencer));
+        assertEq(sequencerFees.inBSX, 0);
+
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        assertEq(tradingFees.inUSDC, fees.taker - int128(fees.takerReferralRebate));
+        assertEq(tradingFees.inBSX, fees.maker - int128(fees.makerReferralRebate));
+
+        assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
+    }
+
+    function test_matchOrders_onlyTakerFeesInBsx() public {
+        vm.startPrank(exchange);
+
+        int256 initBsxBalance = 1000 ether;
+        {
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
+            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
+            spotEngine.modifyAccount(deltas);
+        }
+
+        bool isLiquidation = true;
+        uint128 size = 2 * 1e18;
+        uint128 price = 75_000 * 1e18;
+
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.makerReferralRebate = 2e12;
+        fees.takerReferralRebate = 4e12;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
+        fees.isMakerFeeInBSX = false;
+        fees.isTakerFeeInBSX = true;
+
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+
+        vm.expectEmit(address(orderbook));
+        emit IOrderBook.OrderMatched(
+            productId,
+            maker,
+            taker,
+            makerOrder.orderSide,
+            makerOrder.nonce,
+            takerOrder.nonce,
+            size,
+            price,
+            fees,
+            isLiquidation
+        );
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+
+        int128 expectedBaseAmount = int128(size);
+        int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));
+        assertEq(
+            abi.encode(perpEngine.getOpenPosition(maker, productId)),
+            abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount - fees.maker, 0))
+        );
+        assertEq(
+            abi.encode(perpEngine.getOpenPosition(taker, productId)),
+            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - int128(fees.liquidation), 0))
+        );
+
+        assertEq(abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(0)));
+        assertEq(
+            abi.encode(spotEngine.balance(taker, BSX_TOKEN)),
+            abi.encode(ISpot.Balance(initBsxBalance - fees.taker - int128(fees.sequencer)))
+        );
+
+        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+
+        assertEq(spotEngine.getBalance(token, maker), 0);
+        assertEq(spotEngine.getBalance(token, taker), 0);
+
+        IOrderBook.FeeCollection memory sequencerFees = orderbook.getSequencerFees();
+        assertEq(sequencerFees.inUSDC, 0);
+        assertEq(sequencerFees.inBSX, int128(fees.sequencer));
+
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        assertEq(tradingFees.inUSDC, fees.maker - int128(fees.makerReferralRebate));
+        assertEq(tradingFees.inBSX, fees.taker - int128(fees.takerReferralRebate));
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }

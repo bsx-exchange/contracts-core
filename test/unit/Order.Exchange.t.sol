@@ -537,6 +537,115 @@ contract OrderExchangeTest is Test {
         exchange.processBatch(operation.toArray());
     }
 
+    function test_processBatch_matchLiquidationOrders_withBsxFees() public {
+        vm.startPrank(sequencer);
+
+        WrappedOrder memory generalOrder;
+        generalOrder.isLiquidated = true;
+        generalOrder.productId = 1;
+        generalOrder.size = 5 * 1e18;
+        generalOrder.price = 75_000 * 1e18;
+        generalOrder.makerNonce = 66;
+        generalOrder.takerNonce = 77;
+        generalOrder.makerSide = IOrderBook.OrderSide.BUY;
+        generalOrder.takerSide = IOrderBook.OrderSide.SELL;
+
+        generalOrder.fees.maker = 2 * 1e12;
+        generalOrder.fees.taker = 3 * 1e12;
+        generalOrder.fees.sequencer = 5 * 1e12;
+        generalOrder.fees.liquidation = 4e12;
+        generalOrder.fees.isMakerFeeInBSX = true;
+        generalOrder.fees.isTakerFeeInBSX = true;
+
+        bytes memory operation;
+
+        {
+            bytes memory makerEncodedOrder = _encodeOrder(
+                makerSignerKey,
+                IOrderBook.Order({
+                    sender: maker,
+                    size: generalOrder.size,
+                    price: generalOrder.price,
+                    nonce: generalOrder.makerNonce,
+                    productIndex: generalOrder.productId,
+                    orderSide: generalOrder.makerSide,
+                    orderHash: bytes32(0)
+                }),
+                false,
+                generalOrder.fees.maker
+            );
+
+            bytes memory takerEncodedOrder = _encodeOrder(
+                takerSignerKey,
+                IOrderBook.Order({
+                    sender: taker,
+                    size: generalOrder.size,
+                    price: generalOrder.price,
+                    nonce: generalOrder.takerNonce,
+                    productIndex: generalOrder.productId,
+                    orderSide: generalOrder.takerSide,
+                    orderHash: bytes32(0)
+                }),
+                generalOrder.isLiquidated,
+                generalOrder.fees.taker
+            );
+
+            ReferralRebate memory referralRebate;
+            operation = _encodeDataToOperation(
+                IExchange.OperationType.MatchLiquidationOrders,
+                _encodeOrders(
+                    makerEncodedOrder,
+                    takerEncodedOrder,
+                    generalOrder.fees.sequencer,
+                    referralRebate,
+                    generalOrder.fees.liquidation,
+                    generalOrder.fees.isMakerFeeInBSX,
+                    generalOrder.fees.isTakerFeeInBSX
+                )
+            );
+        }
+        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+
+        vm.expectEmit(address(orderbook));
+        emit IOrderBook.OrderMatched(
+            generalOrder.productId,
+            maker,
+            taker,
+            generalOrder.makerSide,
+            generalOrder.makerNonce,
+            generalOrder.takerNonce,
+            generalOrder.size,
+            generalOrder.price,
+            generalOrder.fees,
+            generalOrder.isLiquidated
+        );
+        exchange.processBatch(operation.toArray());
+
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        assertEq(tradingFees.inBSX, generalOrder.fees.maker + generalOrder.fees.taker);
+
+        IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
+        IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
+
+        // maker goes long
+        assertEq(makerPerpBalance.size, int128(generalOrder.size));
+        assertEq(makerPerpBalance.quoteBalance, -int128(generalOrder.size).mul18D(int128(generalOrder.price)));
+
+        // taker goes short
+        assertEq(takerPerpBalance.size, -int128(generalOrder.size));
+        assertEq(
+            takerPerpBalance.quoteBalance,
+            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int128(generalOrder.fees.liquidation)
+        );
+        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+
+        assertEq(exchange.balanceOf(maker, address(collateralToken)), 0);
+        assertEq(exchange.balanceOf(maker, BSX_TOKEN), -generalOrder.fees.maker);
+
+        assertEq(exchange.balanceOf(taker, address(collateralToken)), 0);
+        assertEq(exchange.balanceOf(taker, BSX_TOKEN), -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer)));
+    }
+
     function test_processBatch_matchLiquidatedOrders_revertsIfNotLiquidatedOrder() public {
         vm.startPrank(sequencer);
 
@@ -1039,6 +1148,145 @@ contract OrderExchangeTest is Test {
         );
     }
 
+    function test_processBatch_matchLiquidationOrders_referralRebate_withBsxFees() public {
+        vm.startPrank(sequencer);
+
+        WrappedOrder memory generalOrder;
+        generalOrder.isLiquidated = true;
+        generalOrder.productId = 1;
+        generalOrder.size = 5 * 1e18;
+        generalOrder.price = 75_000 * 1e18;
+        generalOrder.makerNonce = 66;
+        generalOrder.takerNonce = 77;
+        generalOrder.makerSide = IOrderBook.OrderSide.BUY;
+        generalOrder.takerSide = IOrderBook.OrderSide.SELL;
+
+        generalOrder.fees.maker = 2 * 1e12;
+        generalOrder.fees.taker = 3 * 1e12;
+        generalOrder.fees.sequencer = 5 * 1e12;
+        generalOrder.fees.liquidation = 4e12;
+        generalOrder.fees.isMakerFeeInBSX = true;
+        generalOrder.fees.isTakerFeeInBSX = true;
+
+        ReferralRebate memory referralRebate = ReferralRebate({
+            makerReferrer: makeAddr("makerReferrer"),
+            makerReferrerRebateRate: 1000, // 10%
+            takerReferrer: makeAddr("takerReferrer"),
+            takerReferrerRebateRate: 500 // 5%
+        });
+        bytes memory operation;
+
+        {
+            bytes memory makerEncodedOrder = _encodeOrder(
+                makerSignerKey,
+                IOrderBook.Order({
+                    sender: maker,
+                    size: generalOrder.size,
+                    price: generalOrder.price,
+                    nonce: generalOrder.makerNonce,
+                    productIndex: generalOrder.productId,
+                    orderSide: generalOrder.makerSide,
+                    orderHash: bytes32(0)
+                }),
+                false,
+                generalOrder.fees.maker
+            );
+
+            bytes memory takerEncodedOrder = _encodeOrder(
+                takerSignerKey,
+                IOrderBook.Order({
+                    sender: taker,
+                    size: generalOrder.size,
+                    price: generalOrder.price,
+                    nonce: generalOrder.takerNonce,
+                    productIndex: generalOrder.productId,
+                    orderSide: generalOrder.takerSide,
+                    orderHash: bytes32(0)
+                }),
+                generalOrder.isLiquidated,
+                generalOrder.fees.taker
+            );
+
+            operation = _encodeDataToOperation(
+                IExchange.OperationType.MatchLiquidationOrders,
+                _encodeOrders(
+                    makerEncodedOrder,
+                    takerEncodedOrder,
+                    generalOrder.fees.sequencer,
+                    referralRebate,
+                    generalOrder.fees.liquidation,
+                    generalOrder.fees.isMakerFeeInBSX,
+                    generalOrder.fees.isTakerFeeInBSX
+                )
+            );
+
+            generalOrder.fees.makerReferralRebate =
+                uint128(generalOrder.fees.maker).calculatePercentage(referralRebate.makerReferrerRebateRate);
+            generalOrder.fees.takerReferralRebate =
+                uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
+        }
+        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.RebateReferrer(
+            referralRebate.makerReferrer,
+            uint128(generalOrder.fees.maker).calculatePercentage(referralRebate.makerReferrerRebateRate),
+            true
+        );
+        emit IExchange.RebateReferrer(
+            referralRebate.takerReferrer,
+            uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate),
+            true
+        );
+        vm.expectEmit(address(orderbook));
+        emit IOrderBook.OrderMatched(
+            generalOrder.productId,
+            maker,
+            taker,
+            generalOrder.makerSide,
+            generalOrder.makerNonce,
+            generalOrder.takerNonce,
+            generalOrder.size,
+            generalOrder.price,
+            generalOrder.fees,
+            generalOrder.isLiquidated
+        );
+        exchange.processBatch(operation.toArray());
+
+        int256 makerReferrerBalance = exchange.balanceOf(referralRebate.makerReferrer, BSX_TOKEN);
+        int256 takerReferrerBalance = exchange.balanceOf(referralRebate.takerReferrer, BSX_TOKEN);
+        assertEq(uint256(makerReferrerBalance), generalOrder.fees.makerReferralRebate);
+        assertEq(uint256(takerReferrerBalance), generalOrder.fees.takerReferralRebate);
+
+        IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
+        assertEq(
+            tradingFees.inBSX,
+            generalOrder.fees.maker + generalOrder.fees.taker - int128(generalOrder.fees.makerReferralRebate)
+                - int128(generalOrder.fees.takerReferralRebate)
+        );
+
+        IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
+        IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
+
+        // maker goes long
+        assertEq(makerPerpBalance.size, int128(generalOrder.size));
+        assertEq(makerPerpBalance.quoteBalance, -int128(generalOrder.size).mul18D(int128(generalOrder.price)));
+
+        // taker goes short
+        assertEq(takerPerpBalance.size, -int128(generalOrder.size));
+        assertEq(
+            takerPerpBalance.quoteBalance,
+            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int128(generalOrder.fees.liquidation)
+        );
+        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+
+        assertEq(exchange.balanceOf(maker, address(collateralToken)), 0);
+        assertEq(exchange.balanceOf(maker, BSX_TOKEN), -generalOrder.fees.maker);
+
+        assertEq(exchange.balanceOf(taker, address(collateralToken)), 0);
+        assertEq(exchange.balanceOf(taker, BSX_TOKEN), -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer)));
+    }
+
     function test_processBatch_matchOrders_referralRebate_revertsIfExceedMaxRebateRate() public {
         vm.startPrank(sequencer);
 
@@ -1353,7 +1601,7 @@ contract OrderExchangeTest is Test {
         assertEq(exchange.balanceOf(maker, address(collateralToken)), -rebateMaker);
     }
 
-    function test_processBatch_matchLiquidationOrders_withBsxFees() public {
+    function test_processBatch_matchLiquidatedOrders_rebateMaker_withBsxFees() public {
         vm.startPrank(sequencer);
 
         WrappedOrder memory generalOrder;
@@ -1366,10 +1614,11 @@ contract OrderExchangeTest is Test {
         generalOrder.makerSide = IOrderBook.OrderSide.BUY;
         generalOrder.takerSide = IOrderBook.OrderSide.SELL;
 
-        generalOrder.fees.maker = 2 * 1e12;
+        int128 rebateMaker = -2 * 1e12;
+        generalOrder.fees.maker = rebateMaker;
         generalOrder.fees.taker = 3 * 1e12;
-        generalOrder.fees.sequencer = 5 * 1e12;
         generalOrder.fees.liquidation = 4e12;
+        generalOrder.fees.sequencer = 5 * 1e12;
         generalOrder.fees.isMakerFeeInBSX = true;
         generalOrder.fees.isTakerFeeInBSX = true;
 
@@ -1394,7 +1643,7 @@ contract OrderExchangeTest is Test {
                     orderHash: bytes32(0)
                 }),
                 false,
-                generalOrder.fees.maker
+                rebateMaker
             );
 
             bytes memory takerEncodedOrder = _encodeOrder(
@@ -1425,24 +1674,25 @@ contract OrderExchangeTest is Test {
                 )
             );
 
-            generalOrder.fees.makerReferralRebate =
-                uint128(generalOrder.fees.maker).calculatePercentage(referralRebate.makerReferrerRebateRate);
+            // referrer rebate for only taker
             generalOrder.fees.takerReferralRebate =
                 uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
         }
         uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
+        // not charge maker fee
+        generalOrder.fees.maker = 0;
+
         vm.expectEmit(address(exchange));
-        emit IExchange.RebateReferrer(
-            referralRebate.makerReferrer,
-            uint128(generalOrder.fees.maker).calculatePercentage(referralRebate.makerReferrerRebateRate),
-            true
-        );
         emit IExchange.RebateReferrer(
             referralRebate.takerReferrer,
             uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate),
             true
         );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.RebateMaker(maker, uint128(-rebateMaker), true);
+
         vm.expectEmit(address(orderbook));
         emit IOrderBook.OrderMatched(
             generalOrder.productId,
@@ -1458,19 +1708,18 @@ contract OrderExchangeTest is Test {
         );
         exchange.processBatch(operation.toArray());
 
-        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+        assertEq(uint256(exchange.balanceOf(referralRebate.makerReferrer, address(collateralToken))), 0);
+        assertEq(uint256(exchange.balanceOf(referralRebate.takerReferrer, address(collateralToken))), 0);
 
-        int256 makerReferrerBalance = exchange.balanceOf(referralRebate.makerReferrer, BSX_TOKEN);
-        int256 takerReferrerBalance = exchange.balanceOf(referralRebate.takerReferrer, BSX_TOKEN);
-        assertEq(uint256(makerReferrerBalance), generalOrder.fees.makerReferralRebate);
-        assertEq(uint256(takerReferrerBalance), generalOrder.fees.takerReferralRebate);
+        assertEq(uint256(exchange.balanceOf(referralRebate.makerReferrer, BSX_TOKEN)), 0);
+        assertEq(
+            uint256(exchange.balanceOf(referralRebate.takerReferrer, BSX_TOKEN)),
+            uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate)
+        );
 
         IOrderBook.FeeCollection memory tradingFees = orderbook.getTradingFees();
-        assertEq(
-            tradingFees.inBSX,
-            generalOrder.fees.maker + generalOrder.fees.taker - int128(generalOrder.fees.makerReferralRebate)
-                - int128(generalOrder.fees.takerReferralRebate)
-        );
+        assertEq(tradingFees.inUSDC, 0);
+        assertEq(tradingFees.inBSX, generalOrder.fees.taker - int128(generalOrder.fees.takerReferralRebate));
 
         IPerp.Balance memory makerPerpBalance = perpEngine.getOpenPosition(maker, generalOrder.productId);
         IPerp.Balance memory takerPerpBalance = perpEngine.getOpenPosition(taker, generalOrder.productId);
@@ -1480,11 +1729,19 @@ contract OrderExchangeTest is Test {
         assertEq(makerPerpBalance.quoteBalance, -int128(generalOrder.size).mul18D(int128(generalOrder.price)));
 
         // taker goes short
+        uint256 liquidationFee = clearingService.getInsuranceFundBalance() - insuranceFundBefore;
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
         assertEq(
             takerPerpBalance.quoteBalance,
-            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int128(generalOrder.fees.liquidation)
+            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int256(liquidationFee)
         );
+        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+
+        assertEq(exchange.balanceOf(maker, address(collateralToken)), 0);
+        assertEq(exchange.balanceOf(maker, BSX_TOKEN), -rebateMaker);
+
+        assertEq(exchange.balanceOf(taker, address(collateralToken)), 0);
+        assertEq(exchange.balanceOf(taker, BSX_TOKEN), -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer)));
     }
 
     function _accountSetup() private {

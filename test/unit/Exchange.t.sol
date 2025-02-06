@@ -705,9 +705,16 @@ contract ExchangeTest is Test {
         ERC20Simple token1 = new ERC20Simple(6);
         ERC20Simple token2 = new ERC20Simple(6);
 
+        uint256 usdcTokenCollectedFee = 50 * 1e18;
+        uint256 bsxTokenCollectedFee = 30 * 1e18;
         uint256 token1CollectedFee = 70 * 1e18;
         uint256 token2CollectedFee = 90 * 1e18;
 
+        stdstore.target(address(exchange)).sig("getSequencerFees(address)").with_key(address(collateralToken))
+            .checked_write(usdcTokenCollectedFee);
+        stdstore.target(address(exchange)).sig("getSequencerFees(address)").with_key(BSX_TOKEN).checked_write(
+            bsxTokenCollectedFee
+        );
         stdstore.target(address(exchange)).sig("getSequencerFees(address)").with_key(address(token1)).checked_write(
             token1CollectedFee
         );
@@ -731,26 +738,30 @@ contract ExchangeTest is Test {
         exchange.addSupportedToken(address(token2));
 
         deal(address(exchange), 1 ether);
-        token1.mint(address(exchange), uint128(token1CollectedFee).convertFrom18D(token1.decimals()));
-        token2.mint(address(exchange), uint128(token2CollectedFee).convertFrom18D(token2.decimals()));
-        collateralToken.mint(
-            address(exchange), uint128(sequencerFees.inUSDC).convertFrom18D(collateralToken.decimals())
-        );
-        ERC20Simple(BSX_TOKEN).mint(address(exchange), uint128(sequencerFees.inBSX));
+        token1.mint(address(exchange), 10_000 ether);
+        token2.mint(address(exchange), 10_000 ether);
+        collateralToken.mint(address(exchange), 10_000 ether);
+        ERC20Simple(BSX_TOKEN).mint(address(exchange), 10_000 ether);
 
+        assertEq(
+            exchange.getSequencerFees(address(collateralToken)), usdcTokenCollectedFee + uint128(sequencerFees.inUSDC)
+        );
+        assertEq(exchange.getSequencerFees(address(BSX_TOKEN)), bsxTokenCollectedFee + uint128(sequencerFees.inBSX));
+        assertEq(exchange.getSequencerFees(address(token1)), token1CollectedFee);
+        assertEq(exchange.getSequencerFees(address(token2)), token2CollectedFee);
+
+        uint256 usdcTokenBalanceBefore = collateralToken.balanceOf(feeRecipient);
+        uint256 bsxTokenBalanceBefore = ERC20Simple(BSX_TOKEN).balanceOf(feeRecipient);
         uint256 token1BalanceBefore = token1.balanceOf(feeRecipient);
         uint256 token2BalanceBefore = token2.balanceOf(feeRecipient);
-        uint256 underlyingTokenBalanceBefore = collateralToken.balanceOf(feeRecipient);
-
-        ERC20Simple(BSX_TOKEN).name();
-        ERC20Simple(BSX_TOKEN).symbol();
-        ERC20Simple(BSX_TOKEN).decimals();
 
         vm.expectEmit(address(exchange));
-        emit IExchange.ClaimSequencerFees(sequencer, address(collateralToken), uint128(sequencerFees.inUSDC));
+        emit IExchange.ClaimSequencerFees(
+            sequencer, address(collateralToken), usdcTokenCollectedFee + uint128(sequencerFees.inUSDC)
+        );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.ClaimSequencerFees(sequencer, BSX_TOKEN, uint128(sequencerFees.inBSX));
+        emit IExchange.ClaimSequencerFees(sequencer, BSX_TOKEN, bsxTokenCollectedFee + uint128(sequencerFees.inBSX));
 
         vm.expectEmit(address(exchange));
         emit IExchange.ClaimSequencerFees(sequencer, address(token1), token1CollectedFee);
@@ -771,12 +782,21 @@ contract ExchangeTest is Test {
         );
         assertEq(
             collateralToken.balanceOf(feeRecipient),
-            underlyingTokenBalanceBefore + uint128(sequencerFees.inUSDC).convertFrom18D(collateralToken.decimals())
+            usdcTokenBalanceBefore
+                + (uint128(usdcTokenCollectedFee) + uint128(sequencerFees.inUSDC)).convertFrom18D(
+                    collateralToken.decimals()
+                )
         );
-        assertEq(ERC20Simple(BSX_TOKEN).balanceOf(feeRecipient), uint128(sequencerFees.inBSX));
+        assertEq(
+            ERC20Simple(BSX_TOKEN).balanceOf(feeRecipient),
+            bsxTokenBalanceBefore + bsxTokenCollectedFee + uint128(sequencerFees.inBSX)
+        );
+
+        assertEq(exchange.getSequencerFees(address(collateralToken)), 0);
+        assertEq(exchange.getSequencerFees(address(BSX_TOKEN)), 0);
         assertEq(exchange.getSequencerFees(address(token1)), 0);
         assertEq(exchange.getSequencerFees(address(token2)), 0);
-        assertEq(exchange.getSequencerFees(address(collateralToken)), 0);
+
         assertEq(abi.encode(orderbook.getSequencerFees()), abi.encode(IOrderBook.FeeCollection(0, 0)));
     }
 

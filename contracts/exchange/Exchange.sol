@@ -339,16 +339,14 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function getSequencerFees(address token) external view returns (uint256) {
+    function getSequencerFees(address token) external view returns (uint256 fees) {
         address underlyingAsset = book.getCollateralToken();
-        uint256 fees = _collectedFee[token];
+        fees = _collectedFee[token];
         if (token == underlyingAsset) {
             fees += book.getSequencerFees().inUSDC.safeUInt256();
         } else if (token == BSX_TOKEN) {
             fees += book.getSequencerFees().inBSX.safeUInt256();
         }
-
-        return fees;
     }
 
     /// @inheritdoc IExchange
@@ -538,7 +536,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         );
     }
 
-    function coverLoss(address account, address payer, address asset) external override returns (uint256) {
+    function coverLoss(address account, address payer, address asset) external override returns (uint256 coverAmount) {
         if (msg.sender != address(access.getVaultManager())) {
             revert Errors.Unauthorized();
         }
@@ -547,7 +545,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         if (loss >= 0) {
             revert Errors.Exchange_AccountNoLoss(account, asset);
         }
-        uint256 coverAmount = SignedMath.abs(loss);
+        coverAmount = SignedMath.abs(loss);
         int256 payerBalance = balanceOf(payer, asset);
         if (payerBalance < coverAmount.safeInt256()) {
             revert Errors.Exchange_AccountInsufficientBalance(payer, asset, payerBalance, coverAmount);
@@ -557,7 +555,6 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         clearingService.deposit(account, coverAmount, asset);
 
         emit CoverLoss(account, payer, asset, coverAmount);
-        return coverAmount;
     }
 
     /// @dev Validates and authorizes a signer to sign on behalf of a sender.
