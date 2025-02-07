@@ -2,7 +2,6 @@
 pragma solidity >=0.8.25 <0.9.0;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Helper} from "../Helper.sol";
@@ -45,6 +44,8 @@ contract SwapExchangeTest is Test {
     bytes32 private constant SWAP_TYPEHASH = keccak256(
         "Swap(address account,address assetIn,uint256 amountIn,address assetOut,uint256 minAmountOut,uint256 nonce)"
     );
+    bytes32 private constant REGISTER_VAULT_TYPEHASH =
+        keccak256("RegisterVault(address vault,address feeRecipient,uint256 profitShareBps)");
 
     function setUp() public {
         vm.startPrank(sequencer);
@@ -665,8 +666,6 @@ contract SwapExchangeTest is Test {
         (address vault, uint256 vaultPrivKey) = makeAddrAndKey("vault");
         address feeRecipient = makeAddr("feeRecipient");
         uint256 profitShareBps = 100;
-        bytes32 REGISTER_VAULT_TYPEHASH =
-            keccak256("RegisterVault(address vault,address feeRecipient,uint256 profitShareBps)");
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
         bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
         vm.prank(sequencer);

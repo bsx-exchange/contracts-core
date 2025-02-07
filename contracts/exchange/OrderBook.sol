@@ -2,6 +2,8 @@
 pragma solidity ^0.8.23;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {Access} from "./access/Access.sol";
 import {IClearingService} from "./interfaces/IClearingService.sol";
@@ -11,7 +13,13 @@ import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Percentage} from "./lib/Percentage.sol";
-import {BSX_TOKEN, MAX_LIQUIDATION_FEE_RATE, MAX_MATCH_FEE_RATE, MAX_TAKER_SEQUENCER_FEE} from "./share/Constants.sol";
+import {
+    BSX_ORACLE,
+    BSX_TOKEN,
+    MAX_LIQUIDATION_FEE_RATE,
+    MAX_TAKER_SEQUENCER_FEE_IN_USD,
+    MAX_TRADING_FEE_RATE
+} from "./share/Constants.sol";
 
 /// @title Orderbook contract
 /// @notice This contract is used for matching orders
@@ -20,6 +28,7 @@ contract OrderBook is IOrderBook, Initializable {
     using MathHelper for int128;
     using MathHelper for uint128;
     using Percentage for uint128;
+    using SafeCast for uint256;
 
     IClearingService public clearingService;
     ISpot public spotEngine;
@@ -34,6 +43,8 @@ contract OrderBook is IOrderBook, Initializable {
     mapping(uint8 productId => int256 fee) private _sequencerFee; //deprecated
     address private _collateralToken;
     FeeCollection private _sequencerFees;
+
+    uint128 private constant BSX_FEE_MULTIPLIER = 10;
 
     // function initialize(
     //     address _clearingService,
@@ -78,11 +89,6 @@ contract OrderBook is IOrderBook, Initializable {
             revert Errors.Orderbook_OrdersWithSameAccounts();
         }
 
-        // TODO add validation for fee in BSX
-        if (!fees.isTakerFeeInBSX && fees.sequencer > MAX_TAKER_SEQUENCER_FEE) {
-            revert Errors.Orderbook_ExceededMaxSequencerFee();
-        }
-
         uint128 fillAmount = MathHelper.min(maker.size - filled[maker.orderHash], taker.size - filled[taker.orderHash]);
         _verifyUsedNonce(maker.sender, maker.nonce);
         _verifyUsedNonce(taker.sender, taker.nonce);
@@ -104,19 +110,13 @@ contract OrderBook is IOrderBook, Initializable {
             takerDelta.quoteAmount = -makerDelta.quoteAmount;
         }
 
-        // TODO add validation for fee in BSX
-        if (
-            !fees.isMakerFeeInBSX
-                && fees.maker > makerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
-        ) {
-            revert Errors.Orderbook_ExceededMaxTradingFee();
+        uint128 bsxPriceUSD;
+        if (fees.isMakerFeeInBSX || fees.isTakerFeeInBSX) {
+            bsxPriceUSD = BSX_ORACLE.getBsxPriceUsd().toUint128();
         }
-        if (
-            !fees.isTakerFeeInBSX
-                && fees.taker > takerDelta.quoteAmount.abs().calculatePercentage(MAX_MATCH_FEE_RATE).safeInt128()
-        ) {
-            revert Errors.Orderbook_ExceededMaxTradingFee();
-        }
+        _validateTradingFee(fees.maker, makerDelta.quoteAmount.abs(), fees.isMakerFeeInBSX, bsxPriceUSD);
+        _validateTradingFee(fees.taker, takerDelta.quoteAmount.abs(), fees.isTakerFeeInBSX, bsxPriceUSD);
+        _validateSequencerFee(fees.sequencer, fees.isTakerFeeInBSX, bsxPriceUSD);
 
         FeesInBSX memory feesInBSX;
 
@@ -315,6 +315,35 @@ contract OrderBook is IOrderBook, Initializable {
         }
         if (makerSide == OrderSide.SELL && makerPrice > takerPrice) {
             revert Errors.Orderbook_InvalidOrderPrice();
+        }
+    }
+
+    function _validateTradingFee(int128 fee, uint128 quoteAmount, bool isFeeInBSX, uint128 bsxPriceUSD) internal pure {
+        uint128 maxTradingFeeInUSD = quoteAmount.calculatePercentage(MAX_TRADING_FEE_RATE);
+        if (isFeeInBSX) {
+            uint128 maxTradingFeeInBSX =
+                Math.mulDiv(maxTradingFeeInUSD, 1e18, bsxPriceUSD).toUint128() * BSX_FEE_MULTIPLIER;
+            if (fee > maxTradingFeeInBSX.safeInt128()) {
+                revert Errors.Orderbook_ExceededMaxTradingFee();
+            }
+        } else {
+            if (fee > maxTradingFeeInUSD.safeInt128()) {
+                revert Errors.Orderbook_ExceededMaxTradingFee();
+            }
+        }
+    }
+
+    function _validateSequencerFee(uint128 fee, bool isFeeInBSX, uint128 bsxPriceUSD) internal pure {
+        if (isFeeInBSX) {
+            uint128 maxSequencerFeeInBSX =
+                Math.mulDiv(MAX_TAKER_SEQUENCER_FEE_IN_USD, 1e18, bsxPriceUSD).toUint128() * BSX_FEE_MULTIPLIER;
+            if (fee > maxSequencerFeeInBSX) {
+                revert Errors.Orderbook_ExceededMaxSequencerFee();
+            }
+        } else {
+            if (fee > MAX_TAKER_SEQUENCER_FEE_IN_USD) {
+                revert Errors.Orderbook_ExceededMaxSequencerFee();
+            }
         }
     }
 

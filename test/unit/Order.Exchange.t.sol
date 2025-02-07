@@ -14,10 +14,11 @@ import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
+import {IBsxOracle} from "contracts/exchange/interfaces/external/IBsxOracle.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
-import {BSX_TOKEN, MAX_REBATE_RATE, UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
+import {BSX_ORACLE, BSX_TOKEN, MAX_REBATE_RATE, UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 
 // solhint-disable max-states-count
 contract OrderExchangeTest is Test {
@@ -103,6 +104,10 @@ contract OrderExchangeTest is Test {
         exchange.addSupportedToken(address(collateralToken));
 
         _accountSetup();
+
+        vm.mockCall(
+            address(BSX_ORACLE), abi.encodeWithSelector(IBsxOracle.getBsxPriceUsd.selector), abi.encode(0.05 ether)
+        );
 
         vm.stopPrank();
     }

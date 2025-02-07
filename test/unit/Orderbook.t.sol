@@ -8,14 +8,16 @@ import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
+import {IBsxOracle} from "contracts/exchange/interfaces/external/IBsxOracle.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
 import {
+    BSX_ORACLE,
     BSX_TOKEN,
     MAX_LIQUIDATION_FEE_RATE,
-    MAX_MATCH_FEE_RATE,
-    MAX_TAKER_SEQUENCER_FEE
+    MAX_TAKER_SEQUENCER_FEE_IN_USD,
+    MAX_TRADING_FEE_RATE
 } from "contracts/exchange/share/Constants.sol";
 
 contract OrderbookTest is Test {
@@ -38,6 +40,8 @@ contract OrderbookTest is Test {
     Spot private spotEngine;
     ClearingService private clearingService;
     OrderBook private orderbook;
+
+    uint256 private constant BSX_PRICE_IN_USD = 0.05 ether;
 
     function setUp() public {
         access = new Access();
@@ -64,6 +68,12 @@ contract OrderbookTest is Test {
         stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(token);
 
         access.setOrderBook(address(orderbook));
+
+        vm.mockCall(
+            address(BSX_ORACLE),
+            abi.encodeWithSelector(IBsxOracle.getBsxPriceUsd.selector),
+            abi.encode(BSX_PRICE_IN_USD)
+        );
     }
 
     function test_claimSequencerFees() public {
@@ -353,14 +363,21 @@ contract OrderbookTest is Test {
         uint128 price = 75_000 * 1e18;
 
         IOrderBook.Fees memory fees;
-        fees.maker = 2e14;
-        fees.taker = 4e14;
         fees.makerReferralRebate = 2e12;
         fees.takerReferralRebate = 4e12;
         fees.liquidation = 5e14;
-        fees.sequencer = 1e14;
         fees.isMakerFeeInBSX = true;
         fees.isTakerFeeInBSX = true;
+
+        uint128 matchedQuoteAmount = size.mul18D(price);
+        uint256 bsxFeeMultiplier = 10;
+        uint256 maxTradingFeeInBsx = bsxFeeMultiplier
+            * uint256(matchedQuoteAmount.calculatePercentage(MAX_TRADING_FEE_RATE)) * 1e18 / BSX_PRICE_IN_USD;
+        uint256 maxSequencerFeeInBsx = bsxFeeMultiplier * MAX_TAKER_SEQUENCER_FEE_IN_USD * 1e18 / BSX_PRICE_IN_USD;
+
+        fees.maker = int128(uint128(maxTradingFeeInBsx));
+        fees.taker = int128(uint128(maxTradingFeeInBsx));
+        fees.sequencer = uint128(maxSequencerFeeInBsx);
 
         IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
         IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
@@ -573,6 +590,83 @@ contract OrderbookTest is Test {
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
 
+    function test_matchOrders_withBsxFees_revertsIfExceededMaxSequencerFee() public {
+        vm.startPrank(exchange);
+
+        int256 initBsxBalance = 1000 ether;
+        {
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](2);
+            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
+            deltas[1] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
+            spotEngine.modifyAccount(deltas);
+        }
+
+        bool isLiquidation = false;
+        uint128 size = 2 * 1e18;
+        uint128 price = 75_000 * 1e18;
+
+        IOrderBook.Fees memory fees;
+        fees.maker = 2e14;
+        fees.taker = 4e14;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
+        fees.isMakerFeeInBSX = true;
+        fees.isTakerFeeInBSX = true;
+
+        uint128 matchedQuoteAmount = size.mul18D(price);
+        uint256 bsxFeeMultiplier = 10;
+        uint256 maxTradingFeeInBsx = bsxFeeMultiplier
+            * uint256(matchedQuoteAmount.calculatePercentage(MAX_TRADING_FEE_RATE)) * 1e18 / BSX_PRICE_IN_USD;
+
+        fees.maker = int128(uint128(maxTradingFeeInBsx)) + 1;
+        fees.taker = 0;
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+
+        vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+
+        fees.maker = 0;
+        fees.taker = int128(uint128(maxTradingFeeInBsx)) + 1;
+        makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        takerOrder = _createShortOrder(taker, size, price, takerNonce);
+
+        vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+    }
+
+    function test_matchOrders_withBsxFees_revertsIfExceededMaxTradingFee() public {
+        vm.startPrank(exchange);
+
+        int256 initBsxBalance = 1000 ether;
+        {
+            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](2);
+            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
+            deltas[1] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
+            spotEngine.modifyAccount(deltas);
+        }
+
+        bool isLiquidation = false;
+        uint128 size = 2 * 1e18;
+        uint128 price = 75_000 * 1e18;
+
+        IOrderBook.Fees memory fees;
+        fees.liquidation = 5e14;
+        fees.sequencer = 1e14;
+        fees.isMakerFeeInBSX = true;
+        fees.isTakerFeeInBSX = true;
+
+        uint256 bsxFeeMultiplier = 10;
+        uint256 maxSequencerFeeInBsx = bsxFeeMultiplier * MAX_TAKER_SEQUENCER_FEE_IN_USD * 1e18 / BSX_PRICE_IN_USD;
+        fees.sequencer = uint128(maxSequencerFeeInBsx) + 1;
+
+        IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
+        IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
+
+        vm.expectRevert(Errors.Orderbook_ExceededMaxSequencerFee.selector);
+        orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+    }
+
     function test_matchOrders_liquidation() public {
         vm.startPrank(exchange);
 
@@ -754,14 +848,14 @@ contract OrderbookTest is Test {
         uint128 matchedQuoteAmount = size.mul18D(price);
         IOrderBook.Fees memory fees;
 
-        assertEq(MAX_MATCH_FEE_RATE, (2 * uint256(Percentage.ONE_HUNDRED_PERCENT)) / 100);
+        assertEq(MAX_TRADING_FEE_RATE, (2 * uint256(Percentage.ONE_HUNDRED_PERCENT)) / 100);
 
-        fees.maker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE) + 1);
+        fees.maker = int128(matchedQuoteAmount.calculatePercentage(MAX_TRADING_FEE_RATE) + 1);
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
         fees.maker = 0;
-        fees.taker = int128(matchedQuoteAmount.calculatePercentage(MAX_MATCH_FEE_RATE)) + 1;
+        fees.taker = int128(matchedQuoteAmount.calculatePercentage(MAX_TRADING_FEE_RATE)) + 1;
         vm.expectRevert(Errors.Orderbook_ExceededMaxTradingFee.selector);
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
@@ -777,7 +871,7 @@ contract OrderbookTest is Test {
         IOrderBook.Order memory makerOrder = _createLongOrder(maker, size, price, makerNonce);
         IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, price, takerNonce);
 
-        fees.sequencer = MAX_TAKER_SEQUENCER_FEE + 1;
+        fees.sequencer = MAX_TAKER_SEQUENCER_FEE_IN_USD + 1;
 
         vm.expectRevert(Errors.Orderbook_ExceededMaxSequencerFee.selector);
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
