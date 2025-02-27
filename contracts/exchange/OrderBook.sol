@@ -112,7 +112,7 @@ contract OrderBook is IOrderBook, Initializable {
 
         uint128 bsxPriceUSD;
         if (fees.isMakerFeeInBSX || fees.isTakerFeeInBSX) {
-            bsxPriceUSD = BSX_ORACLE.getBsxPriceUsd().toUint128();
+            bsxPriceUSD = BSX_ORACLE.getTokenPriceInUsd(BSX_TOKEN).toUint128();
         }
         _validateTradingFee(fees.maker, makerDelta.quoteAmount.abs(), fees.isMakerFeeInBSX, bsxPriceUSD);
         _validateTradingFee(fees.taker, takerDelta.quoteAmount.abs(), fees.isTakerFeeInBSX, bsxPriceUSD);

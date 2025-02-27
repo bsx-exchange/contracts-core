@@ -27,6 +27,11 @@ interface ISpot {
     /// @param amount Amount to update
     function updateTotalBalance(address token, int256 amount) external;
 
+    /// @notice Sets the cap of a collateral token in USD
+    /// @param token Token address
+    /// @param cap Cap in USD (18 decimals)
+    function setCapInUsd(address token, uint256 cap) external;
+
     /// @notice Gets the collateral balance of an account
     /// @param token Token address
     /// @param account Account address

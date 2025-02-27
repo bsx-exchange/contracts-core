@@ -6,10 +6,13 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {BSX_ORACLE} from "contracts/exchange/share/Constants.sol";
+import {IBsxOracle} from "contracts/misc/interfaces/IBsxOracle.sol";
 
 contract SpotEngineTest is Test {
     using stdStorage for StdStorage;
 
+    address private sequencer = makeAddr("sequencer");
     address private exchange = makeAddr("exchange");
     address private orderBook = makeAddr("orderBook");
     address private clearingService = makeAddr("clearingService");
@@ -22,6 +25,7 @@ contract SpotEngineTest is Test {
         stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
             address(this)
         ).checked_write(true);
+        access.grantRole(access.GENERAL_ROLE(), sequencer);
 
         access.setExchange(exchange);
         access.setClearingService(clearingService);
@@ -90,6 +94,24 @@ contract SpotEngineTest is Test {
         spotEngine.updateTotalBalance(token, 100);
     }
 
+    function test_updateTotalBalance_increase_revertsExceededCap() public {
+        address token = makeAddr("token");
+
+        vm.prank(sequencer);
+        spotEngine.setCapInUsd(token, 1000);
+
+        vm.mockCall(
+            address(BSX_ORACLE),
+            abi.encodeWithSelector(IBsxOracle.getTokenPriceInUsd.selector, token),
+            abi.encode(1 ether)
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.ExceededCap.selector, token));
+
+        vm.prank(exchange);
+        spotEngine.updateTotalBalance(token, 1001);
+    }
+
     function test_updateTotalBalance_decrease() public {
         vm.startPrank(exchange);
 
@@ -105,5 +127,30 @@ contract SpotEngineTest is Test {
         address token = makeAddr("token");
         vm.expectRevert(Errors.Unauthorized.selector);
         spotEngine.updateTotalBalance(token, -100);
+    }
+
+    function test_setCapInUsd() public {
+        address token = makeAddr("token");
+        uint256 cap = 100;
+
+        vm.prank(sequencer);
+        spotEngine.setCapInUsd(token, cap);
+        assertEq(spotEngine.capInUsd(token), cap);
+
+        vm.mockCall(
+            address(BSX_ORACLE),
+            abi.encodeWithSelector(IBsxOracle.getTokenPriceInUsd.selector, token),
+            abi.encode(1 ether)
+        );
+
+        vm.prank(exchange);
+        spotEngine.updateTotalBalance(token, 99);
+    }
+
+    function test_setCapInUsd_revertsWhenUnauthorized() public {
+        address token = makeAddr("token");
+        uint256 cap = 100;
+        vm.expectRevert(Errors.Unauthorized.selector);
+        spotEngine.setCapInUsd(token, cap);
     }
 }

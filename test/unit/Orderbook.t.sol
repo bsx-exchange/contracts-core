@@ -8,7 +8,6 @@ import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
-import {IBsxOracle} from "contracts/exchange/interfaces/external/IBsxOracle.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
@@ -19,6 +18,7 @@ import {
     MAX_TAKER_SEQUENCER_FEE_IN_USD,
     MAX_TRADING_FEE_RATE
 } from "contracts/exchange/share/Constants.sol";
+import {IBsxOracle} from "contracts/misc/interfaces/IBsxOracle.sol";
 
 contract OrderbookTest is Test {
     using MathHelper for uint128;
@@ -71,8 +71,8 @@ contract OrderbookTest is Test {
 
         vm.mockCall(
             address(BSX_ORACLE),
-            abi.encodeWithSelector(IBsxOracle.getBsxPriceUsd.selector),
-            abi.encode(BSX_PRICE_IN_USD)
+            abi.encodeWithSelector(IBsxOracle.getTokenPriceInUsd.selector, BSX_TOKEN),
+            abi.encode(0.05 ether)
         );
     }
 

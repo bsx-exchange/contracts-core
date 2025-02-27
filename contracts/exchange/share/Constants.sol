@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity >=0.8.23;
 
-import {IBsxOracle} from "../interfaces/external/IBsxOracle.sol";
 import {IUniversalSigValidator} from "../interfaces/external/IUniversalSigValidator.sol";
+import {IBsxOracle} from "contracts/misc/interfaces/IBsxOracle.sol";
 
 string constant NAME = "BSX Mainnet";
 string constant VERSION = "1";
@@ -18,4 +18,4 @@ address constant WETH9 = 0x4200000000000000000000000000000000000006;
 address constant BSX_TOKEN = 0xD47F3E45B23b7594F5d5e1CcFde63237c60BE49e;
 IUniversalSigValidator constant UNIVERSAL_SIG_VALIDATOR =
     IUniversalSigValidator(0x3F72193B6687707bfaA5119a3910eb4e27108bE8);
-IBsxOracle constant BSX_ORACLE = IBsxOracle(0xc1b2c51aa9ABa6683331F378b71Ab3Fb532D7EDa);
+IBsxOracle constant BSX_ORACLE = IBsxOracle(0x8243c1F9e796530efA17A429Ac4F9d213853cAB5);
