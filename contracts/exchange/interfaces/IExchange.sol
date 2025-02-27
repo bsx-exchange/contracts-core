@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {IClearingService} from "./IClearingService.sol";
 import {ILiquidation} from "./ILiquidation.sol";
 import {IOrderBook} from "./IOrderBook.sol";
 import {ISwap} from "./ISwap.sol";
@@ -85,14 +86,16 @@ interface IExchange is ILiquidation, ISwap {
     event UpdateFundingRate(uint8 indexed productIndex, int256 diffPrice, int256 cummulativeFundingRate);
 
     /// @dev Emitted when the insurance fund is deposited.
+    /// @param token Token address
     /// @param depositAmount Deposit amount (in 18 decimals)
     /// @param insuranceFund Insurance fund after deposit (in 18 decimals)
-    event DepositInsuranceFund(uint256 depositAmount, uint256 insuranceFund);
+    event DepositInsuranceFund(address token, uint256 depositAmount, IClearingService.InsuranceFund insuranceFund);
 
     /// @dev Emitted when the insurance fund is withdrawn.
+    /// @param token Token address
     /// @param withdrawAmount Withdraw amount (in 18 decimals)
-    /// @param insuranceFund Insurance fund after withdraw (in 18 decimals)
-    event WithdrawInsuranceFund(uint256 withdrawAmount, uint256 insuranceFund);
+    /// @param insuranceFund Insurance fund after withdraw
+    event WithdrawInsuranceFund(address token, uint256 withdrawAmount, IClearingService.InsuranceFund insuranceFund);
 
     /// @notice Emitted when trading fees are claimed
     event ClaimTradingFees(address indexed claimer, IOrderBook.FeeCollection fees);
@@ -293,13 +296,15 @@ interface IExchange is ILiquidation, ISwap {
 
     /// @notice Deposits token to insurance fund
     /// @dev Emits a {DepositInsurance} event
+    /// @param token Token address
     /// @param amount Deposit amount (in 18 decimals)
-    function depositInsuranceFund(uint256 amount) external;
+    function depositInsuranceFund(address token, uint256 amount) external;
 
     /// @notice Withdraws token from insurance fund
     /// @dev Emits a {WithdrawInsurance} event
+    /// @param token Token address
     /// @param amount Withdraw amount (in 18 decimals)
-    function withdrawInsuranceFund(uint256 amount) external;
+    function withdrawInsuranceFund(address token, uint256 amount) external;
 
     /// @notice Claims collected the trading fees
     /// @dev Emits a {ClaimTradingFees} event
@@ -330,8 +335,8 @@ interface IExchange is ILiquidation, ISwap {
     function balanceOf(address user, address token) external view returns (int256);
 
     /// @dev This function get the balance of insurance fund.
-    /// @return Amount of insurance fund
-    function getInsuranceFundBalance() external view returns (uint256);
+    /// @return Insurance fund balance
+    function getInsuranceFundBalance() external view returns (IClearingService.InsuranceFund memory);
 
     /// @notice Gets the supported token list
     /// @return List of supported token

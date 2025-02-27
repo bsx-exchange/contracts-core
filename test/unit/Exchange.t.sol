@@ -9,7 +9,7 @@ import {ERC1271} from "../mock/ERC1271.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 
-import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Perp} from "contracts/exchange/Perp.sol";
@@ -17,7 +17,13 @@ import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
-import {BSX_TOKEN, NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
+import {
+    BSX_TOKEN,
+    NATIVE_ETH,
+    UNIVERSAL_SIG_VALIDATOR,
+    USDC_TOKEN,
+    USDC_TOKEN
+} from "contracts/exchange/share/Constants.sol";
 
 // solhint-disable max-states-count
 contract ExchangeTest is Test {
@@ -28,7 +34,7 @@ contract ExchangeTest is Test {
     address private sequencer = makeAddr("sequencer");
     address private feeRecipient = makeAddr("feeRecipient");
 
-    ERC20Simple private collateralToken = new ERC20Simple(6);
+    ERC20Simple private collateralToken = ERC20Simple(USDC_TOKEN);
 
     Access private access;
     Exchange private exchange;
@@ -91,7 +97,8 @@ contract ExchangeTest is Test {
         exchange.setCanDeposit(true);
         exchange.setCanWithdraw(true);
 
-        exchange.addSupportedToken(address(collateralToken));
+        deployCodeTo("ERC20Simple.sol", abi.encode(6), USDC_TOKEN);
+        exchange.addSupportedToken(USDC_TOKEN);
 
         deployCodeTo("ERC20Simple.sol", abi.encode(18), BSX_TOKEN);
         exchange.addSupportedToken(BSX_TOKEN);
@@ -349,11 +356,11 @@ contract ExchangeTest is Test {
     function test_processBatch_coverLossWithInsuranceFund() public {
         address account = makeAddr("account");
         uint128 loss = 5 * 1e18;
-        uint128 insuranceFund = 100 * 1e18;
+        uint128 insuranceFundUsdc = 100 * 1e18;
 
         vm.startPrank(address(exchange));
-        spotEngine.updateBalance(account, address(collateralToken), -int128(loss));
-        clearingService.depositInsuranceFund(insuranceFund);
+        spotEngine.updateBalance(account, USDC_TOKEN, -int128(loss));
+        clearingService.depositInsuranceFund(USDC_TOKEN, insuranceFundUsdc);
         vm.stopPrank();
 
         bytes memory operation =
@@ -362,8 +369,11 @@ contract ExchangeTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
-        assertEq(spotEngine.getBalance(account, address(collateralToken)), 0);
-        assertEq(clearingService.getInsuranceFundBalance(), insuranceFund - loss);
+        assertEq(spotEngine.getBalance(account, USDC_TOKEN), 0);
+
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, insuranceFundUsdc - loss);
+        assertEq(insuranceFund.inBSX, 0);
     }
 
     function test_processBatch_cumulateFundingRate() public {
@@ -867,24 +877,61 @@ contract ExchangeTest is Test {
         exchange.claimSequencerFees();
     }
 
-    function test_depositInsuranceFund() public {
-        uint128 totalAmount;
-        uint8 tokenDecimals = collateralToken.decimals();
-
+    function test_depositInsuranceFund_succeeds() public {
         vm.startPrank(sequencer);
+
+        uint8 usdcDecimals = 6;
+        uint8 bsxDecimals = 18;
+        IClearingService.InsuranceFund memory insuranceFund;
 
         for (uint128 i = 1; i < 5; i++) {
             uint128 amount = i * 1e18;
-            _prepareDeposit(sequencer, amount);
+            _prepareDeposit(sequencer, USDC_TOKEN, amount);
 
-            totalAmount += amount;
+            insuranceFund.inUSDC += amount;
             vm.expectEmit(address(exchange));
-            emit IExchange.DepositInsuranceFund(amount, totalAmount);
-            exchange.depositInsuranceFund(amount);
+            emit IExchange.DepositInsuranceFund(USDC_TOKEN, amount, insuranceFund);
+            exchange.depositInsuranceFund(USDC_TOKEN, amount);
 
-            assertEq(clearingService.getInsuranceFundBalance(), totalAmount);
-            assertEq(exchange.getInsuranceFundBalance(), totalAmount);
-            assertEq(collateralToken.balanceOf(address(exchange)), totalAmount.convertFrom18D(tokenDecimals));
+            assertEq(clearingService.getInsuranceFundBalance().inUSDC, insuranceFund.inUSDC);
+            assertEq(clearingService.getInsuranceFundBalance().inBSX, insuranceFund.inBSX);
+
+            assertEq(exchange.getInsuranceFundBalance().inUSDC, insuranceFund.inUSDC);
+            assertEq(exchange.getInsuranceFundBalance().inBSX, insuranceFund.inBSX);
+
+            assertEq(
+                ERC20Simple(USDC_TOKEN).balanceOf(address(exchange)),
+                uint128(insuranceFund.inUSDC).convertFrom18D(usdcDecimals)
+            );
+            assertEq(
+                ERC20Simple(BSX_TOKEN).balanceOf(address(exchange)),
+                uint128(insuranceFund.inBSX).convertFrom18D(bsxDecimals)
+            );
+        }
+
+        for (uint128 i = 1; i < 3; i++) {
+            uint128 amount = i * 2e18;
+            _prepareDeposit(sequencer, BSX_TOKEN, amount);
+
+            insuranceFund.inBSX += amount;
+            vm.expectEmit(address(exchange));
+            emit IExchange.DepositInsuranceFund(BSX_TOKEN, amount, insuranceFund);
+            exchange.depositInsuranceFund(BSX_TOKEN, amount);
+
+            assertEq(clearingService.getInsuranceFundBalance().inUSDC, insuranceFund.inUSDC);
+            assertEq(clearingService.getInsuranceFundBalance().inBSX, insuranceFund.inBSX);
+
+            assertEq(exchange.getInsuranceFundBalance().inUSDC, insuranceFund.inUSDC);
+            assertEq(exchange.getInsuranceFundBalance().inBSX, insuranceFund.inBSX);
+
+            assertEq(
+                ERC20Simple(USDC_TOKEN).balanceOf(address(exchange)),
+                uint128(insuranceFund.inUSDC).convertFrom18D(usdcDecimals)
+            );
+            assertEq(
+                ERC20Simple(BSX_TOKEN).balanceOf(address(exchange)),
+                uint128(insuranceFund.inBSX).convertFrom18D(bsxDecimals)
+            );
         }
     }
 
@@ -896,44 +943,71 @@ contract ExchangeTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
         );
-        exchange.depositInsuranceFund(100);
+        exchange.depositInsuranceFund(USDC_TOKEN, 100);
     }
 
     function test_depositInsuranceFund_revertsIfZeroAmount() public {
         vm.startPrank(sequencer);
         uint128 zeroAmount = 0;
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
-        exchange.depositInsuranceFund(zeroAmount);
+        exchange.depositInsuranceFund(USDC_TOKEN, zeroAmount);
 
         uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
-        exchange.depositInsuranceFund(maxZeroScaledAmount);
+        exchange.depositInsuranceFund(USDC_TOKEN, maxZeroScaledAmount);
     }
 
     function test_withdrawInsuranceFund() public {
-        uint128 totalAmount;
-        uint8 tokenDecimals = collateralToken.decimals();
-
         vm.startPrank(sequencer);
 
+        uint8 usdcDecimals = 6;
+        uint8 bsxDecimals = 18;
+        IClearingService.InsuranceFund memory insuranceFund;
+
         for (uint128 i = 1; i < 5; i++) {
             uint128 amount = i * 1e18;
-            _prepareDeposit(sequencer, amount);
+            _prepareDeposit(sequencer, USDC_TOKEN, amount);
 
-            totalAmount += amount;
-            emit IExchange.DepositInsuranceFund(amount, totalAmount);
-            exchange.depositInsuranceFund(amount);
+            insuranceFund.inUSDC += amount;
+            emit IExchange.DepositInsuranceFund(USDC_TOKEN, amount, insuranceFund);
+            exchange.depositInsuranceFund(USDC_TOKEN, amount);
+
+            amount = 2 * amount;
+
+            insuranceFund.inBSX += amount;
+            _prepareDeposit(sequencer, BSX_TOKEN, amount);
+            emit IExchange.DepositInsuranceFund(BSX_TOKEN, amount, insuranceFund);
+            exchange.depositInsuranceFund(BSX_TOKEN, amount);
         }
 
-        for (uint128 i = 1; i < 5; i++) {
+        for (uint128 i = 1; i < 2; i++) {
             uint128 amount = i * 1e18;
-            totalAmount -= amount;
+            insuranceFund.inUSDC -= amount;
             vm.expectEmit(address(exchange));
-            emit IExchange.WithdrawInsuranceFund(amount, totalAmount);
-            exchange.withdrawInsuranceFund(amount);
+            emit IExchange.WithdrawInsuranceFund(USDC_TOKEN, amount, insuranceFund);
+            exchange.withdrawInsuranceFund(USDC_TOKEN, amount);
 
-            assertEq(clearingService.getInsuranceFundBalance(), totalAmount);
-            assertEq(collateralToken.balanceOf(address(exchange)), totalAmount.convertFrom18D(tokenDecimals));
+            assertEq(clearingService.getInsuranceFundBalance().inUSDC, insuranceFund.inUSDC);
+            assertEq(clearingService.getInsuranceFundBalance().inBSX, insuranceFund.inBSX);
+            assertEq(
+                ERC20Simple(USDC_TOKEN).balanceOf(address(exchange)),
+                uint128(insuranceFund.inUSDC).convertFrom18D(usdcDecimals)
+            );
+        }
+
+        for (uint128 i = 1; i < 4; i++) {
+            uint128 amount = i * 1e18;
+            insuranceFund.inBSX -= amount;
+            vm.expectEmit(address(exchange));
+            emit IExchange.WithdrawInsuranceFund(BSX_TOKEN, amount, insuranceFund);
+            exchange.withdrawInsuranceFund(BSX_TOKEN, amount);
+
+            assertEq(clearingService.getInsuranceFundBalance().inUSDC, insuranceFund.inUSDC);
+            assertEq(clearingService.getInsuranceFundBalance().inBSX, insuranceFund.inBSX);
+            assertEq(
+                ERC20Simple(BSX_TOKEN).balanceOf(address(exchange)),
+                uint128(insuranceFund.inBSX).convertFrom18D(bsxDecimals)
+            );
         }
     }
 
@@ -945,18 +1019,18 @@ contract ExchangeTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
         );
-        exchange.withdrawInsuranceFund(100);
+        exchange.withdrawInsuranceFund(USDC_TOKEN, 100);
     }
 
     function test_withdrawInsuranceFund_revertsIfZeroAmount() public {
         vm.startPrank(sequencer);
         uint128 zeroAmount = 0;
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
-        exchange.withdrawInsuranceFund(zeroAmount);
+        exchange.withdrawInsuranceFund(USDC_TOKEN, zeroAmount);
 
         uint128 maxZeroScaledAmount = _maxZeroScaledAmount();
         vm.expectRevert(Errors.Exchange_ZeroAmount.selector);
-        exchange.withdrawInsuranceFund(maxZeroScaledAmount);
+        exchange.withdrawInsuranceFund(USDC_TOKEN, maxZeroScaledAmount);
     }
 
     function test_setPauseBatchProcess() public {

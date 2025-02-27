@@ -7,7 +7,7 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
 import {UniversalRouter} from "../mock/UniversalRouter.sol";
 
-import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange} from "contracts/exchange/Exchange.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
@@ -15,6 +15,7 @@ import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {ILiquidation} from "contracts/exchange/interfaces/ILiquidation.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {USDC_TOKEN} from "contracts/exchange/share/Constants.sol";
 
 contract LiquidationExchangeTest is Test {
     using stdStorage for StdStorage;
@@ -28,12 +29,14 @@ contract LiquidationExchangeTest is Test {
     OrderBook private orderbook;
     Spot private spotEngine;
 
-    ERC20Simple private underlyingAsset = new ERC20Simple(6);
+    ERC20Simple private underlyingAsset = ERC20Simple(USDC_TOKEN);
 
     UniversalRouter private mockUniversalRouter;
 
     function setUp() public {
         vm.startPrank(admin);
+
+        deployCodeTo("ERC20Simple.sol", abi.encode(6), USDC_TOKEN);
 
         access = new Access();
         stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(admin)
@@ -130,7 +133,9 @@ contract LiquidationExchangeTest is Test {
         );
         exchange.liquidateCollateralBatch(params);
 
-        assertEq(exchange.getInsuranceFundBalance(), fee);
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, fee);
+        assertEq(insuranceFund.inBSX, 0);
 
         assertEq(exchange.balanceOf(user, address(liquidationAsset)), 0);
         assertEq(exchange.balanceOf(user, address(underlyingAsset)), 1000 * 500 * 1e18 * 95 / 100);

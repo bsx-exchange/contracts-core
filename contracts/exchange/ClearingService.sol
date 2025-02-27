@@ -6,9 +6,9 @@ import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 
 import {Access} from "./access/Access.sol";
 import {IClearingService} from "./interfaces/IClearingService.sol";
-import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
+import {BSX_TOKEN, USDC_TOKEN} from "./share/Constants.sol";
 
 /// @title Clearinghouse contract
 /// @notice Manage insurance fund and spot balance
@@ -17,7 +17,7 @@ contract ClearingService is IClearingService, Initializable {
     using SafeCast for uint256;
 
     Access public access;
-    uint256 private insuranceFundBalance;
+    InsuranceFund private _insuranceFund;
 
     // function initialize(address _access) public initializer {
     //     if (_access == address(0)) {
@@ -53,50 +53,68 @@ contract ClearingService is IClearingService, Initializable {
     }
 
     /// @inheritdoc IClearingService
-    function depositInsuranceFund(uint256 amount) external onlySequencer {
-        if (amount == 0) {
-            revert Errors.ClearingService_ZeroAmount();
+    function collectLiquidationFee(address account, uint64 nonce, uint256 amount, bool isFeeInBSX)
+        external
+        onlySequencer
+    {
+        if (isFeeInBSX) {
+            _insuranceFund.inBSX += amount;
+        } else {
+            _insuranceFund.inUSDC += amount;
         }
-        insuranceFundBalance += amount;
+        emit CollectLiquidationFee(account, nonce, amount, isFeeInBSX, _insuranceFund);
     }
 
     /// @inheritdoc IClearingService
-    function collectLiquidationFee(address account, uint64 nonce, uint256 amount) external onlySequencer {
-        insuranceFundBalance += amount;
-        emit CollectLiquidationFee(account, nonce, amount, insuranceFundBalance);
-    }
-
-    /// @inheritdoc IClearingService
-    function withdrawInsuranceFundEmergency(uint256 amount) external onlySequencer {
+    function depositInsuranceFund(address token, uint256 amount) external onlySequencer {
         if (amount == 0) {
             revert Errors.ClearingService_ZeroAmount();
         }
-        if (amount > insuranceFundBalance) {
-            revert Errors.ClearingService_InsufficientFund(amount, insuranceFundBalance);
+
+        if (token == USDC_TOKEN) {
+            _insuranceFund.inUSDC += amount;
+        } else if (token == BSX_TOKEN) {
+            _insuranceFund.inBSX += amount;
+        } else {
+            revert Errors.ClearingService_InvalidToken(token);
         }
-        insuranceFundBalance -= amount;
+    }
+
+    /// @inheritdoc IClearingService
+    function withdrawInsuranceFund(address token, uint256 amount) external onlySequencer {
+        if (amount == 0) {
+            revert Errors.ClearingService_ZeroAmount();
+        }
+        if (token == USDC_TOKEN) {
+            _insuranceFund.inUSDC -= amount;
+        } else if (token == BSX_TOKEN) {
+            _insuranceFund.inBSX -= amount;
+        } else {
+            revert Errors.ClearingService_InvalidToken(token);
+        }
     }
 
     /// @inheritdoc IClearingService
     function coverLossWithInsuranceFund(address account, uint256 amount) external onlySequencer {
-        IOrderBook orderBook = IOrderBook(access.getOrderBook());
         ISpot spotEngine = ISpot(access.getSpotEngine());
 
-        address collateralToken = orderBook.getCollateralToken();
+        address collateralToken = USDC_TOKEN;
         int256 balance = spotEngine.getBalance(collateralToken, account);
         if (balance >= 0) {
             revert Errors.ClearingService_NoLoss(account, balance);
         }
 
-        if (amount > insuranceFundBalance) {
-            revert Errors.ClearingService_InsufficientFund(amount, insuranceFundBalance);
+        uint256 insuranceFundInUSDC = _insuranceFund.inUSDC;
+        if (amount > insuranceFundInUSDC) {
+            revert Errors.ClearingService_InsufficientFund(amount, insuranceFundInUSDC);
         }
-        insuranceFundBalance -= amount;
+        _insuranceFund.inUSDC -= amount;
 
         spotEngine.updateBalance(account, collateralToken, amount.toInt256());
     }
 
-    function getInsuranceFundBalance() external view returns (uint256) {
-        return insuranceFundBalance;
+    /// @inheritdoc IClearingService
+    function getInsuranceFundBalance() external view returns (InsuranceFund memory) {
+        return _insuranceFund;
     }
 }

@@ -3,7 +3,7 @@ pragma solidity >=0.8.25 <0.9.0;
 
 import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
-import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
@@ -347,7 +347,7 @@ contract OrderbookTest is Test {
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }
 
-    function test_matchOrders_withBsxFees() public {
+    function test_matchOrders_withBsxFees_succeeds() public {
         vm.startPrank(exchange);
 
         int256 initBsxBalance = 1000 ether;
@@ -401,17 +401,19 @@ contract OrderbookTest is Test {
         );
         assertEq(
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
-            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - int128(fees.liquidation), 0))
+            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
 
-        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, 0);
+        assertEq(insuranceFund.inBSX, fees.liquidation);
 
         assertEq(
             abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(initBsxBalance - fees.maker))
         );
         assertEq(
             abi.encode(spotEngine.balance(taker, BSX_TOKEN)),
-            abi.encode(ISpot.Balance(initBsxBalance - fees.taker - int128(fees.sequencer)))
+            abi.encode(ISpot.Balance(initBsxBalance - fees.taker - int128(fees.sequencer) - int128(fees.liquidation)))
         );
 
         assertEq(spotEngine.getBalance(token, maker), 0);
@@ -491,7 +493,9 @@ contract OrderbookTest is Test {
         );
         assertEq(abi.encode(spotEngine.balance(taker, BSX_TOKEN)), abi.encode(ISpot.Balance(0)));
 
-        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, fees.liquidation);
+        assertEq(insuranceFund.inBSX, 0);
 
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
@@ -553,16 +557,18 @@ contract OrderbookTest is Test {
         );
         assertEq(
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
-            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount - int128(fees.liquidation), 0))
+            abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
 
         assertEq(abi.encode(spotEngine.balance(maker, BSX_TOKEN)), abi.encode(ISpot.Balance(0)));
         assertEq(
             abi.encode(spotEngine.balance(taker, BSX_TOKEN)),
-            abi.encode(ISpot.Balance(initBsxBalance - fees.taker - int128(fees.sequencer)))
+            abi.encode(ISpot.Balance(initBsxBalance - fees.taker - int128(fees.sequencer) - int128(fees.liquidation)))
         );
 
-        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, 0);
+        assertEq(insuranceFund.inBSX, fees.liquidation);
 
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
@@ -647,7 +653,7 @@ contract OrderbookTest is Test {
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
     }
 
-    function test_matchOrders_liquidation() public {
+    function test_matchOrders_liquidation_succeeds() public {
         vm.startPrank(exchange);
 
         bool isLiquidation = true;
@@ -693,7 +699,10 @@ contract OrderbookTest is Test {
             tradingFees.inUSDC,
             fees.maker + fees.taker - int128(fees.makerReferralRebate) - int128(fees.takerReferralRebate)
         );
-        assertEq(clearingService.getInsuranceFundBalance(), fees.liquidation);
+
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, fees.liquidation);
+        assertEq(insuranceFund.inBSX, 0);
 
         assertEq(orderbook.isMatched(maker, makerNonce, taker, takerNonce), true);
     }

@@ -7,7 +7,7 @@ import {Helper} from "../Helper.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 
-import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
@@ -612,7 +612,8 @@ contract OrderExchangeTest is Test {
                 )
             );
         }
-        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+
+        IClearingService.InsuranceFund memory insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         vm.expectEmit(address(orderbook));
         emit IOrderBook.OrderMatched(
@@ -641,17 +642,20 @@ contract OrderExchangeTest is Test {
 
         // taker goes short
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
-        assertEq(
-            takerPerpBalance.quoteBalance,
-            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int128(generalOrder.fees.liquidation)
-        );
-        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+        assertEq(takerPerpBalance.quoteBalance, int128(generalOrder.size).mul18D(int128(generalOrder.price)));
+
+        IClearingService.InsuranceFund memory insuranceFundAfter = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFundAfter.inUSDC, insuranceFundBefore.inUSDC);
+        assertEq(insuranceFundAfter.inBSX, insuranceFundBefore.inBSX + generalOrder.fees.liquidation);
 
         assertEq(exchange.balanceOf(maker, address(collateralToken)), 0);
         assertEq(exchange.balanceOf(maker, BSX_TOKEN), -generalOrder.fees.maker);
 
         assertEq(exchange.balanceOf(taker, address(collateralToken)), 0);
-        assertEq(exchange.balanceOf(taker, BSX_TOKEN), -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer)));
+        assertEq(
+            exchange.balanceOf(taker, BSX_TOKEN),
+            -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer) + int128(generalOrder.fees.liquidation))
+        );
     }
 
     function test_processBatch_matchLiquidatedOrders_revertsIfNotLiquidatedOrder() public {
@@ -1090,7 +1094,7 @@ contract OrderExchangeTest is Test {
         generalOrder.fees.takerReferralRebate =
             uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
 
-        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+        IClearingService.InsuranceFund memory insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         vm.expectEmit(address(exchange));
         emit IExchange.RebateReferrer(
@@ -1147,13 +1151,16 @@ contract OrderExchangeTest is Test {
         );
 
         // taker goes short
-        uint256 liquidationFee = clearingService.getInsuranceFundBalance() - insuranceFundBefore;
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
         assertEq(
             takerPerpBalance.quoteBalance,
             int128(generalOrder.size).mul18D(int128(generalOrder.price)) - generalOrder.fees.taker
-                - int256(liquidationFee)
+                - int128(generalOrder.fees.liquidation)
         );
+
+        IClearingService.InsuranceFund memory insuranceFundAfter = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFundAfter.inUSDC, insuranceFundBefore.inUSDC + generalOrder.fees.liquidation);
+        assertEq(insuranceFundAfter.inBSX, insuranceFundBefore.inBSX);
     }
 
     function test_processBatch_matchLiquidationOrders_referralRebate_withBsxFees() public {
@@ -1233,7 +1240,7 @@ contract OrderExchangeTest is Test {
             generalOrder.fees.takerReferralRebate =
                 uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
         }
-        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+        IClearingService.InsuranceFund memory insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         vm.expectEmit(address(exchange));
         emit IExchange.RebateReferrer(
@@ -1282,17 +1289,20 @@ contract OrderExchangeTest is Test {
 
         // taker goes short
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
-        assertEq(
-            takerPerpBalance.quoteBalance,
-            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int128(generalOrder.fees.liquidation)
-        );
-        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+        assertEq(takerPerpBalance.quoteBalance, int128(generalOrder.size).mul18D(int128(generalOrder.price)));
+
+        IClearingService.InsuranceFund memory insuranceFundAfter = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFundAfter.inUSDC, insuranceFundBefore.inUSDC);
+        assertEq(insuranceFundAfter.inBSX, insuranceFundBefore.inBSX + generalOrder.fees.liquidation);
 
         assertEq(exchange.balanceOf(maker, address(collateralToken)), 0);
         assertEq(exchange.balanceOf(maker, BSX_TOKEN), -generalOrder.fees.maker);
 
         assertEq(exchange.balanceOf(taker, address(collateralToken)), 0);
-        assertEq(exchange.balanceOf(taker, BSX_TOKEN), -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer)));
+        assertEq(
+            exchange.balanceOf(taker, BSX_TOKEN),
+            -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer) + int128(generalOrder.fees.liquidation))
+        );
     }
 
     function test_processBatch_matchOrders_referralRebate_revertsIfExceedMaxRebateRate() public {
@@ -1487,7 +1497,7 @@ contract OrderExchangeTest is Test {
         assertEq(exchange.balanceOf(maker, address(collateralToken)), -rebateMaker);
     }
 
-    function test_processBatch_matchLiquidatedOrders_rebateMaker() public {
+    function test_processBatch_matchLiquidatedOrders_rebateMaker_succeeds() public {
         vm.startPrank(sequencer);
 
         WrappedOrder memory generalOrder;
@@ -1560,7 +1570,7 @@ contract OrderExchangeTest is Test {
             generalOrder.fees.takerReferralRebate =
                 uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
         }
-        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+        IClearingService.InsuranceFund memory insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         // not charge maker fee
         generalOrder.fees.maker = 0;
@@ -1597,16 +1607,19 @@ contract OrderExchangeTest is Test {
         assertEq(makerPerpBalance.quoteBalance, -int128(generalOrder.size).mul18D(int128(generalOrder.price)));
 
         // taker goes short
-        uint256 liquidationFee = clearingService.getInsuranceFundBalance() - insuranceFundBefore;
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
         assertEq(
             takerPerpBalance.quoteBalance,
             int128(generalOrder.size).mul18D(int128(generalOrder.price)) - generalOrder.fees.taker
-                - int128(generalOrder.fees.sequencer) - int256(liquidationFee)
+                - int128(generalOrder.fees.sequencer) - int128(generalOrder.fees.liquidation)
         );
 
         // rebate fee to Maker account
         assertEq(exchange.balanceOf(maker, address(collateralToken)), -rebateMaker);
+
+        IClearingService.InsuranceFund memory insuranceFundAfter = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFundAfter.inUSDC, insuranceFundBefore.inUSDC + generalOrder.fees.liquidation);
+        assertEq(insuranceFundAfter.inBSX, insuranceFundBefore.inBSX);
     }
 
     function test_processBatch_matchLiquidatedOrders_rebateMaker_withBsxFees() public {
@@ -1686,7 +1699,7 @@ contract OrderExchangeTest is Test {
             generalOrder.fees.takerReferralRebate =
                 uint128(generalOrder.fees.taker).calculatePercentage(referralRebate.takerReferrerRebateRate);
         }
-        uint256 insuranceFundBefore = clearingService.getInsuranceFundBalance();
+        IClearingService.InsuranceFund memory insuranceFundBefore = clearingService.getInsuranceFundBalance();
 
         // not charge maker fee
         generalOrder.fees.maker = 0;
@@ -1737,19 +1750,21 @@ contract OrderExchangeTest is Test {
         assertEq(makerPerpBalance.quoteBalance, -int128(generalOrder.size).mul18D(int128(generalOrder.price)));
 
         // taker goes short
-        uint256 liquidationFee = clearingService.getInsuranceFundBalance() - insuranceFundBefore;
+        IClearingService.InsuranceFund memory insuranceFundAfter = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFundAfter.inUSDC, insuranceFundBefore.inUSDC);
+        assertEq(insuranceFundAfter.inBSX, insuranceFundBefore.inBSX + generalOrder.fees.liquidation);
+
         assertEq(takerPerpBalance.size, -int128(generalOrder.size));
-        assertEq(
-            takerPerpBalance.quoteBalance,
-            int128(generalOrder.size).mul18D(int128(generalOrder.price)) - int256(liquidationFee)
-        );
-        assertEq(clearingService.getInsuranceFundBalance(), insuranceFundBefore + generalOrder.fees.liquidation);
+        assertEq(takerPerpBalance.quoteBalance, int128(generalOrder.size).mul18D(int128(generalOrder.price)));
 
         assertEq(exchange.balanceOf(maker, address(collateralToken)), 0);
         assertEq(exchange.balanceOf(maker, BSX_TOKEN), -rebateMaker);
 
         assertEq(exchange.balanceOf(taker, address(collateralToken)), 0);
-        assertEq(exchange.balanceOf(taker, BSX_TOKEN), -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer)));
+        assertEq(
+            exchange.balanceOf(taker, BSX_TOKEN),
+            -(generalOrder.fees.taker + int128(generalOrder.fees.sequencer) + int128(generalOrder.fees.liquidation))
+        );
     }
 
     function _accountSetup() private {

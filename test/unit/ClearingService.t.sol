@@ -8,6 +8,7 @@ import {OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {BSX_TOKEN, USDC_TOKEN} from "contracts/exchange/share/Constants.sol";
 
 contract ClearingServiceTest is Test {
     using stdStorage for StdStorage;
@@ -79,58 +80,90 @@ contract ClearingServiceTest is Test {
     function test_depositInsuranceFund() public {
         vm.startPrank(exchange);
 
-        uint256 amount = 100;
-        clearingService.depositInsuranceFund(amount);
-        assertEq(clearingService.getInsuranceFundBalance(), amount);
+        uint256 usdcAmount = 100;
+        clearingService.depositInsuranceFund(USDC_TOKEN, usdcAmount);
+
+        uint256 bsxAmount = 200;
+        clearingService.depositInsuranceFund(BSX_TOKEN, bsxAmount);
+
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, usdcAmount);
+        assertEq(insuranceFund.inBSX, bsxAmount);
     }
 
     function test_depositInsuranceFund_revertsIfZeroAmount() public {
         vm.startPrank(exchange);
 
         vm.expectRevert(Errors.ClearingService_ZeroAmount.selector);
-        clearingService.depositInsuranceFund(0);
+        clearingService.depositInsuranceFund(USDC_TOKEN, 0);
     }
 
     function test_depositInsuranceFund_revertsWhenUnauthorized() public {
         vm.expectRevert(Errors.Unauthorized.selector);
-        clearingService.depositInsuranceFund(10);
+        clearingService.depositInsuranceFund(USDC_TOKEN, 10);
     }
 
-    function test_withdrawInsuranceFundEmergency() public {
+    function test_depositInsuranceFund_revertsWhenInvalidToken() public {
+        vm.prank(exchange);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_InvalidToken.selector, token));
+        clearingService.depositInsuranceFund(token, 10);
+    }
+
+    function test_withdrawInsuranceFund() public {
         vm.startPrank(exchange);
 
-        uint256 amount = 100;
-        clearingService.depositInsuranceFund(amount);
-        assertEq(clearingService.getInsuranceFundBalance(), amount);
+        uint256 usdcAmount = 100;
+        clearingService.depositInsuranceFund(USDC_TOKEN, usdcAmount);
 
-        clearingService.withdrawInsuranceFundEmergency(amount);
-        assertEq(clearingService.getInsuranceFundBalance(), 0);
+        uint256 bsxAmount = 200;
+        clearingService.depositInsuranceFund(BSX_TOKEN, bsxAmount);
+
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, usdcAmount);
+        assertEq(insuranceFund.inBSX, bsxAmount);
+
+        clearingService.withdrawInsuranceFund(USDC_TOKEN, 50);
+        clearingService.withdrawInsuranceFund(BSX_TOKEN, 80);
+
+        insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, usdcAmount - 50);
+        assertEq(insuranceFund.inBSX, bsxAmount - 80);
     }
 
-    function test_withdrawInsuranceFundEmergency_revertsIfZeroAmount() public {
+    function test_withdrawInsuranceFund_revertsIfZeroAmount() public {
         vm.startPrank(exchange);
 
         vm.expectRevert(Errors.ClearingService_ZeroAmount.selector);
-        clearingService.withdrawInsuranceFundEmergency(0);
+        clearingService.withdrawInsuranceFund(USDC_TOKEN, 0);
     }
 
-    function test_withdrawInsuranceFundEmergency_revertsWhenUnauthorized() public {
+    function test_withdrawInsuranceFund_revertsWhenUnauthorized() public {
         vm.expectRevert(Errors.Unauthorized.selector);
-        clearingService.withdrawInsuranceFundEmergency(10);
+        clearingService.withdrawInsuranceFund(USDC_TOKEN, 10);
     }
 
-    function test_withdrawInsuranceFundEmergency_revertsIfInsufficientFund() public {
+    function test_withdrawInsuranceFund_revertsIfInsufficientFund() public {
         vm.startPrank(exchange);
 
         uint256 amount = 100;
-        clearingService.depositInsuranceFund(amount);
-        assertEq(clearingService.getInsuranceFundBalance(), amount);
+        clearingService.depositInsuranceFund(USDC_TOKEN, amount);
+        clearingService.depositInsuranceFund(BSX_TOKEN, amount);
 
         uint256 withdrawAmount = amount + 1;
-        vm.expectRevert(
-            abi.encodeWithSelector(Errors.ClearingService_InsufficientFund.selector, withdrawAmount, amount)
-        );
-        clearingService.withdrawInsuranceFundEmergency(withdrawAmount);
+
+        vm.expectRevert();
+        clearingService.withdrawInsuranceFund(USDC_TOKEN, withdrawAmount);
+
+        vm.expectRevert();
+        clearingService.withdrawInsuranceFund(BSX_TOKEN, withdrawAmount);
+    }
+
+    function test_withdrawInsuranceFund_revertsWhenInvalidToken() public {
+        vm.prank(exchange);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_InvalidToken.selector, token));
+        clearingService.withdrawInsuranceFund(token, 10);
     }
 
     function test_collectLiquidationFee() public {
@@ -138,32 +171,57 @@ contract ClearingServiceTest is Test {
 
         uint64 nonce = 10;
         uint256 amount = 100;
+        bool isFeeInBSX = false;
+
+        IClearingService.InsuranceFund memory expectedInsuranceFund =
+            IClearingService.InsuranceFund({inUSDC: 100, inBSX: 0});
+
         vm.expectEmit();
-        emit IClearingService.CollectLiquidationFee(account, nonce, amount, amount);
-        clearingService.collectLiquidationFee(account, nonce, amount);
-        assertEq(clearingService.getInsuranceFundBalance(), amount);
+        emit IClearingService.CollectLiquidationFee(account, nonce, amount, isFeeInBSX, expectedInsuranceFund);
+        clearingService.collectLiquidationFee(account, nonce, amount, isFeeInBSX);
+
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, 100);
+        assertEq(insuranceFund.inBSX, 0);
+
+        nonce = 12;
+        amount = 200;
+        isFeeInBSX = true;
+
+        expectedInsuranceFund = IClearingService.InsuranceFund({inUSDC: 100, inBSX: 200});
+
+        vm.expectEmit();
+        emit IClearingService.CollectLiquidationFee(account, nonce, amount, isFeeInBSX, expectedInsuranceFund);
+        clearingService.collectLiquidationFee(account, nonce, amount, isFeeInBSX);
+
+        insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, 100);
+        assertEq(insuranceFund.inBSX, 200);
     }
 
     function test_collectLiquidationFee_revertsWhenUnauthorized() public {
-        vm.expectRevert(Errors.Unauthorized.selector);
-
         uint64 nonce = 10;
         uint256 amount = 100;
-        clearingService.collectLiquidationFee(account, nonce, amount);
+        bool isFeeInBSX = false;
+
+        vm.expectRevert(Errors.Unauthorized.selector);
+        clearingService.collectLiquidationFee(account, nonce, amount, isFeeInBSX);
     }
 
     function test_coverLossWithInsuranceFund() public {
         vm.startPrank(exchange);
 
         uint256 fund = 1000;
-        clearingService.depositInsuranceFund(fund);
+        clearingService.depositInsuranceFund(USDC_TOKEN, fund);
 
         int256 loss = -100;
-        spotEngine.updateBalance(account, token, loss);
+        spotEngine.updateBalance(account, USDC_TOKEN, loss);
 
         clearingService.coverLossWithInsuranceFund(account, uint256(-loss));
-        assertEq(spotEngine.getBalance(account, token), int256(0));
-        assertEq(clearingService.getInsuranceFundBalance(), fund - uint256(-loss));
+        assertEq(spotEngine.getBalance(account, USDC_TOKEN), int256(0));
+
+        IClearingService.InsuranceFund memory insuranceFund = clearingService.getInsuranceFundBalance();
+        assertEq(insuranceFund.inUSDC, fund - uint256(-loss));
     }
 
     function test_coverLossWithInsuranceFund_revertsWhenUnauthorized() public {
@@ -175,8 +233,8 @@ contract ClearingServiceTest is Test {
         vm.startPrank(exchange);
 
         uint256 balance = 100;
-        clearingService.depositInsuranceFund(balance);
-        spotEngine.updateBalance(account, token, int256(balance));
+        clearingService.depositInsuranceFund(USDC_TOKEN, balance);
+        spotEngine.updateBalance(account, USDC_TOKEN, int256(balance));
 
         vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_NoLoss.selector, account, int256(balance)));
         clearingService.coverLossWithInsuranceFund(account, 10);
@@ -186,10 +244,10 @@ contract ClearingServiceTest is Test {
         vm.startPrank(exchange);
 
         uint256 fund = 100;
-        clearingService.depositInsuranceFund(fund);
+        clearingService.depositInsuranceFund(USDC_TOKEN, fund);
 
         int256 loss = -1000;
-        spotEngine.updateBalance(account, token, loss);
+        spotEngine.updateBalance(account, USDC_TOKEN, loss);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_InsufficientFund.selector, uint256(-loss), fund));
         clearingService.coverLossWithInsuranceFund(account, uint256(-loss));

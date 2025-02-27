@@ -11,6 +11,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 
 import {IBSX1000x} from "../1000x/interfaces/IBSX1000x.sol";
 import {ExchangeStorage} from "./ExchangeStorage.sol";
+import {IClearingService} from "./interfaces/IClearingService.sol";
 import {IExchange, ILiquidation, ISwap} from "./interfaces/IExchange.sol";
 import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IVaultManager} from "./interfaces/IVaultManager.sol";
@@ -158,29 +159,27 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function depositInsuranceFund(uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
-        address token = book.getCollateralToken();
+    function depositInsuranceFund(address token, uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
         (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
-        clearingService.depositInsuranceFund(roundDownAmount);
+        clearingService.depositInsuranceFund(token, roundDownAmount);
 
-        uint256 insuranceFundBalance = clearingService.getInsuranceFundBalance();
-        emit DepositInsuranceFund(roundDownAmount, insuranceFundBalance);
+        IClearingService.InsuranceFund memory insuranceFundBalance = clearingService.getInsuranceFundBalance();
+        emit DepositInsuranceFund(token, roundDownAmount, insuranceFundBalance);
     }
 
     /// @inheritdoc IExchange
-    function withdrawInsuranceFund(uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
-        address token = book.getCollateralToken();
+    function withdrawInsuranceFund(address token, uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
         uint256 amountToTransfer = amount.convertFromScale(token);
         if (amount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
+        clearingService.withdrawInsuranceFund(token, amount);
         IERC20(token).safeTransfer(msg.sender, amountToTransfer);
-        clearingService.withdrawInsuranceFundEmergency(amount);
 
-        uint256 insuranceFundBalance = clearingService.getInsuranceFundBalance();
-        emit WithdrawInsuranceFund(amount, insuranceFundBalance);
+        IClearingService.InsuranceFund memory insuranceFundBalance = clearingService.getInsuranceFundBalance();
+        emit WithdrawInsuranceFund(token, amount, insuranceFundBalance);
     }
 
     /// @inheritdoc IExchange
@@ -329,7 +328,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function getInsuranceFundBalance() external view returns (uint256) {
+    function getInsuranceFundBalance() external view returns (IClearingService.InsuranceFund memory) {
         return clearingService.getInsuranceFundBalance();
     }
 

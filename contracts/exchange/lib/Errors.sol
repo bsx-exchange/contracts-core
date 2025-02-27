@@ -180,6 +180,9 @@ library Errors {
     /// @notice Thrown when setting the zero amount
     error ClearingService_ZeroAmount();
 
+    /// @notice Thrown when invalid token
+    error ClearingService_InvalidToken(address token);
+
     /// @notice Thrown when insufficient fund in insurance fund
     /// @param amount Requested amount
     /// @param fund Current fund

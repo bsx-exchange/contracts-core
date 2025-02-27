@@ -121,7 +121,8 @@ contract OrderBook is IOrderBook, Initializable {
         FeesInBSX memory feesInBSX;
 
         if (isLiquidation) {
-            _collectLiquidationFee(fees.liquidation, taker, takerDelta);
+            _validateLiquidationFee(fees.liquidation, takerDelta.quoteAmount.abs(), fees.isTakerFeeInBSX, bsxPriceUSD);
+            _collectLiquidationFee(fees.liquidation, taker, takerDelta, fees.isTakerFeeInBSX, feesInBSX);
         }
 
         _collectTradingFees(fees, makerDelta, takerDelta, feesInBSX);
@@ -201,15 +202,19 @@ contract OrderBook is IOrderBook, Initializable {
         perpEngine.modifyAccount(_accountDeltas);
     }
 
-    function _collectLiquidationFee(uint128 liquidationFee, Order memory taker, Delta memory takerDelta) internal {
-        uint128 maxLiquidationFee = takerDelta.quoteAmount.abs().calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
-
-        if (liquidationFee > maxLiquidationFee) {
-            revert Errors.Orderbook_ExceededMaxLiquidationFee();
+    function _collectLiquidationFee(
+        uint128 liquidationFee,
+        Order memory taker,
+        Delta memory takerDelta,
+        bool isTakerFeeInBSX,
+        FeesInBSX memory feesInBSX
+    ) internal {
+        if (isTakerFeeInBSX) {
+            feesInBSX.taker += liquidationFee.safeInt128();
+        } else {
+            takerDelta.quoteAmount -= liquidationFee.safeInt128();
         }
-
-        takerDelta.quoteAmount -= liquidationFee.safeInt128();
-        clearingService.collectLiquidationFee(taker.sender, taker.nonce, liquidationFee);
+        clearingService.collectLiquidationFee(taker.sender, taker.nonce, liquidationFee, isTakerFeeInBSX);
     }
 
     function _collectTradingFees(
@@ -334,6 +339,25 @@ contract OrderBook is IOrderBook, Initializable {
         } else {
             if (fee > MAX_TAKER_SEQUENCER_FEE_IN_USD) {
                 revert Errors.Orderbook_ExceededMaxSequencerFee();
+            }
+        }
+    }
+
+    function _validateLiquidationFee(uint128 fee, uint128 quoteAmount, bool isFeeInBSX, uint128 bsxPriceUSD)
+        internal
+        pure
+    {
+        uint128 maxLiquidationFeeInUSD = quoteAmount.calculatePercentage(MAX_LIQUIDATION_FEE_RATE);
+
+        if (isFeeInBSX) {
+            uint128 maxLiquidationFeeInBSX =
+                Math.mulDiv(maxLiquidationFeeInUSD, 1e18, bsxPriceUSD).toUint128() * BSX_FEE_MULTIPLIER;
+            if (fee > maxLiquidationFeeInBSX) {
+                revert Errors.Orderbook_ExceededMaxLiquidationFee();
+            }
+        } else {
+            if (fee > maxLiquidationFeeInUSD) {
+                revert Errors.Orderbook_ExceededMaxLiquidationFee();
             }
         }
     }

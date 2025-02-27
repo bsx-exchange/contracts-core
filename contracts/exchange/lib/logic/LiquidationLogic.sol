@@ -128,7 +128,7 @@ library LiquidationLogic {
                 uint256 netAmountOutX18 = amountOutX18 - feeX18;
 
                 // deposit tokenOut
-                engines.clearingService.depositInsuranceFund(feeX18);
+                engines.clearingService.depositInsuranceFund(underlyingAsset, feeX18);
                 engines.clearingService.deposit(account, netAmountOutX18, underlyingAsset);
 
                 emit ILiquidation.LiquidateCollateral(

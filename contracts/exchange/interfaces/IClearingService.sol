@@ -4,8 +4,16 @@ pragma solidity ^0.8.23;
 /// @title Clearing service interface
 /// @notice Manage insurance fund and spot balance
 interface IClearingService {
+    /// @notice Insurance fund balance
+    struct InsuranceFund {
+        uint256 inUSDC;
+        uint256 inBSX;
+    }
+
     /// @dev Emitted when liquidation fee is collected
-    event CollectLiquidationFee(address indexed account, uint64 indexed nonce, uint256 amount, uint256 insuranceFund);
+    event CollectLiquidationFee(
+        address indexed account, uint64 indexed nonce, uint256 amount, bool isFeeInBSX, InsuranceFund insuranceFund
+    );
 
     /// @notice Deposits token to spot account
     /// @param account Account address
@@ -20,18 +28,21 @@ interface IClearingService {
     function withdraw(address account, uint256 amount, address token) external;
 
     /// @notice Deposits token to insurance fund
-    /// @param amount Amount of token
-    function depositInsuranceFund(uint256 amount) external;
+    /// @param token Token address
+    /// @param amount Amount of token (in 18 decimals)
+    function depositInsuranceFund(address token, uint256 amount) external;
 
     /// @notice Withdraw token from insurance fund
-    /// @param amount Amount of token
-    function withdrawInsuranceFundEmergency(uint256 amount) external;
+    /// @param token Token address
+    /// @param amount Amount of token (in 18 decimals)
+    function withdrawInsuranceFund(address token, uint256 amount) external;
 
     /// @notice Withdraw token from insurance fund
     /// @param account Account is liquidated
     /// @param nonce Order nonce
     /// @param amount Amount of token (in 18 decimals)
-    function collectLiquidationFee(address account, uint64 nonce, uint256 amount) external;
+    /// @param isFeeInBSX Whether the fee is in BSX or not
+    function collectLiquidationFee(address account, uint64 nonce, uint256 amount, bool isFeeInBSX) external;
 
     /// @notice Uses the insurance fund to cover the loss of the account
     /// @param account Account address to cover loss
@@ -39,5 +50,5 @@ interface IClearingService {
     function coverLossWithInsuranceFund(address account, uint256 amount) external;
 
     /// @notice Gets insurance fund balance
-    function getInsuranceFundBalance() external view returns (uint256);
+    function getInsuranceFundBalance() external view returns (InsuranceFund memory);
 }
