@@ -5,8 +5,21 @@ import {Test} from "forge-std/Test.sol";
 
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
 
+contract PercentageCall {
+    /// @dev add this to exclude from the coverage report
+    function test() public pure returns (bool) {
+        return true;
+    }
+
+    function calculatePercentage(uint128 amount, uint16 percentage) public pure returns (uint128) {
+        return Percentage.calculatePercentage(amount, percentage);
+    }
+}
+
 contract PercentageTest is Test {
     using Percentage for uint128;
+
+    PercentageCall private percentageCall = new PercentageCall();
 
     function test_calculatePercentage() public pure {
         uint128 amount = 50_000;
@@ -32,6 +45,6 @@ contract PercentageTest is Test {
 
         uint16 percentage = 10_001; // 100.01%
         vm.expectRevert();
-        amount.calculatePercentage(percentage);
+        percentageCall.calculatePercentage(amount, percentage);
     }
 }

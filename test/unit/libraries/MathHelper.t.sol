@@ -12,6 +12,18 @@ contract MathHelperCall {
         return true;
     }
 
+    function mul18D(int128 x, int128 y) public pure returns (int128) {
+        return MathHelper.mul18D(x, y);
+    }
+
+    function safeUInt256(int256 a) public pure returns (uint256) {
+        return MathHelper.safeUInt256(a);
+    }
+
+    function safeInt256(uint256 a) public pure returns (int256) {
+        return MathHelper.safeInt256(a);
+    }
+
     function safeInt128(uint128 a) public pure returns (int128) {
         return MathHelper.safeInt128(a);
     }
@@ -66,14 +78,14 @@ contract MathHelperTest is Test {
         int128 x = type(int128).max;
         int128 y = 1e18 + 1;
         vm.expectRevert(MathHelper.InvalidInt128.selector);
-        x.mul18D(y);
+        mathHelperCall.mul18D(x, y);
     }
 
     function test_mul18D_revertsIfUnderflow() public {
         int128 x = type(int128).min;
         int128 y = 1e18 + 1;
         vm.expectRevert(MathHelper.InvalidInt128.selector);
-        x.mul18D(y);
+        mathHelperCall.mul18D(x, y);
     }
 
     function test_min() public pure {
@@ -143,54 +155,54 @@ contract MathHelperTest is Test {
         assertEq(roundDownAmount, 100 * 1e18);
     }
 
-    function test_safeUInt256() public pure {
+    function test_safeUInt256() public view {
         int256 n = 100;
-        assertEq(MathHelper.safeUInt256(n), 100);
+        assertEq(mathHelperCall.safeUInt256(n), 100);
     }
 
     function test_safeUInt256_revertsIfUnderflow() public {
         int256 n = -1;
         vm.expectRevert(MathHelper.InvalidUInt256.selector);
-        MathHelper.safeUInt256(n);
+        mathHelperCall.safeUInt256(n);
     }
 
-    function test_safeUInt128() public pure {
+    function test_safeUInt128() public view {
         uint256 a = 100;
-        assertEq(MathHelper.safeUInt128(a), 100);
+        assertEq(mathHelperCall.safeUInt128(a), 100);
 
         int128 b = 50;
-        assertEq(MathHelper.safeUInt128(b), 50);
+        assertEq(mathHelperCall.safeUInt128(b), 50);
     }
 
     function test_safeUInt128_revertsIfOverflow() public {
         uint256 n = uint256(type(uint128).max) + 1;
         vm.expectRevert(MathHelper.InvalidUInt128.selector);
-        MathHelper.safeUInt128(n);
+        mathHelperCall.safeUInt128(n);
     }
 
     function test_safeUInt128_revertsIfUnderflow() public {
         int128 n = -1;
         vm.expectRevert(MathHelper.InvalidUInt128.selector);
-        MathHelper.safeUInt128(n);
+        mathHelperCall.safeUInt128(n);
     }
 
-    function test_safeInt256() public pure {
+    function test_safeInt256() public view {
         uint256 n = 100;
-        assertEq(MathHelper.safeInt256(n), 100);
+        assertEq(mathHelperCall.safeInt256(n), 100);
     }
 
     function test_safeInt256_revertsIfOverflow() public {
         uint256 n = uint256(type(int256).max) + 1;
         vm.expectRevert(MathHelper.InvalidInt256.selector);
-        MathHelper.safeInt256(n);
+        mathHelperCall.safeInt256(n);
     }
 
-    function test_safeInt128() public pure {
+    function test_safeInt128() public view {
         int256 n = 100;
-        assertEq(MathHelper.safeInt128(n), 100);
+        assertEq(mathHelperCall.safeInt128(n), 100);
 
         n = -100;
-        assertEq(MathHelper.safeInt128(n), -100);
+        assertEq(mathHelperCall.safeInt128(n), -100);
     }
 
     function test_safeInt128_revertsIfOverflow() public {
@@ -206,6 +218,6 @@ contract MathHelperTest is Test {
     function test_safeInt128_revertsIfUnderflow() public {
         int256 a = int256(type(int128).min) - 1;
         vm.expectRevert(MathHelper.InvalidInt128.selector);
-        MathHelper.safeInt128(a);
+        mathHelperCall.safeInt128(a);
     }
 }
