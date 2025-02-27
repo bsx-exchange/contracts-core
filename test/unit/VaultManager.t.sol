@@ -10,7 +10,7 @@ import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
-import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Spot} from "contracts/exchange/Spot.sol";
 import {IVaultManager, VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
@@ -336,10 +336,8 @@ contract VaultManagerTest is Test {
         // current vault balance = 75 ether
         // x2 vault balance = 150 ether => price = 2 ether
         uint256 increasedAmount = 75 ether;
-        ISpot.AccountDelta[] memory accounts = new ISpot.AccountDelta[](1);
-        accounts[0] = ISpot.AccountDelta(address(asset), vault, int256(increasedAmount));
         vm.prank(address(clearingService));
-        spotEngine.modifyAccount(accounts);
+        spotEngine.updateBalance(vault, address(asset), int256(increasedAmount));
 
         // 3. stake 50 ether
         nonce = 3;
@@ -589,10 +587,8 @@ contract VaultManagerTest is Test {
         _depositExchange(asset, staker, 100 ether);
 
         uint256 loss = 30 ether;
-        ISpot.AccountDelta[] memory accounts = new ISpot.AccountDelta[](1);
-        accounts[0] = ISpot.AccountDelta(address(asset), vault, -int256(loss));
         vm.prank(address(clearingService));
-        spotEngine.modifyAccount(accounts);
+        spotEngine.updateBalance(vault, address(asset), -int256(loss));
 
         uint256 anyShare = 10 ether;
         assertEq(vaultManager.convertToAssets(vault, anyShare), 0);
@@ -647,10 +643,8 @@ contract VaultManagerTest is Test {
         _depositExchange(asset, staker, 100 ether);
 
         uint256 loss = 90 ether;
-        ISpot.AccountDelta[] memory accounts = new ISpot.AccountDelta[](1);
-        accounts[0] = ISpot.AccountDelta(address(asset), vault, -int256(loss));
         vm.prank(address(clearingService));
-        spotEngine.modifyAccount(accounts);
+        spotEngine.updateBalance(vault, address(asset), -int256(loss));
 
         uint256 nonce = 456;
         uint256 stakeAmount = 80 ether;
@@ -795,10 +789,8 @@ contract VaultManagerTest is Test {
 
         // vault balance grows to 150 ether
         uint256 increasedAmount = 50 ether;
-        ISpot.AccountDelta[] memory accounts = new ISpot.AccountDelta[](1);
-        accounts[0] = ISpot.AccountDelta(address(asset), vault, int256(increasedAmount));
         vm.prank(address(clearingService));
-        spotEngine.modifyAccount(accounts);
+        spotEngine.updateBalance(vault, address(asset), int256(increasedAmount));
 
         // unstake 60 ether with price 1.5 ether => 40 shares
         uint256 fee = 2 ether;
@@ -1137,10 +1129,8 @@ contract VaultManagerTest is Test {
 
         // vault balance = -20 ether
         uint256 loss = 100 ether;
-        ISpot.AccountDelta[] memory accounts = new ISpot.AccountDelta[](1);
-        accounts[0] = ISpot.AccountDelta(address(asset), vault, -int256(loss));
         vm.prank(address(clearingService));
-        spotEngine.modifyAccount(accounts);
+        spotEngine.updateBalance(vault, address(asset), -int256(loss));
 
         uint256 unstakeAmount = 1;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));

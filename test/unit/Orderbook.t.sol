@@ -351,12 +351,8 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         int256 initBsxBalance = 1000 ether;
-        {
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](2);
-            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
-            deltas[1] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
-            spotEngine.modifyAccount(deltas);
-        }
+        spotEngine.updateBalance(maker, BSX_TOKEN, initBsxBalance);
+        spotEngine.updateBalance(taker, BSX_TOKEN, initBsxBalance);
 
         bool isLiquidation = true;
         uint128 size = 2 * 1e18;
@@ -439,11 +435,7 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         int256 initBsxBalance = 1000 ether;
-        {
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
-            spotEngine.modifyAccount(deltas);
-        }
+        spotEngine.updateBalance(maker, BSX_TOKEN, initBsxBalance);
 
         bool isLiquidation = true;
         uint128 size = 2 * 1e18;
@@ -519,11 +511,7 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         int256 initBsxBalance = 1000 ether;
-        {
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
-            spotEngine.modifyAccount(deltas);
-        }
+        spotEngine.updateBalance(taker, BSX_TOKEN, initBsxBalance);
 
         bool isLiquidation = true;
         uint128 size = 2 * 1e18;
@@ -594,12 +582,8 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         int256 initBsxBalance = 1000 ether;
-        {
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](2);
-            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
-            deltas[1] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
-            spotEngine.modifyAccount(deltas);
-        }
+        spotEngine.updateBalance(maker, BSX_TOKEN, initBsxBalance);
+        spotEngine.updateBalance(taker, BSX_TOKEN, initBsxBalance);
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;
@@ -639,12 +623,8 @@ contract OrderbookTest is Test {
         vm.startPrank(exchange);
 
         int256 initBsxBalance = 1000 ether;
-        {
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](2);
-            deltas[0] = ISpot.AccountDelta({token: BSX_TOKEN, account: maker, amount: initBsxBalance});
-            deltas[1] = ISpot.AccountDelta({token: BSX_TOKEN, account: taker, amount: initBsxBalance});
-            spotEngine.modifyAccount(deltas);
-        }
+        spotEngine.updateBalance(maker, BSX_TOKEN, initBsxBalance);
+        spotEngine.updateBalance(taker, BSX_TOKEN, initBsxBalance);
 
         bool isLiquidation = false;
         uint128 size = 2 * 1e18;

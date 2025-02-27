@@ -10,7 +10,7 @@ import {UniversalRouter} from "../mock/UniversalRouter.sol";
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange} from "contracts/exchange/Exchange.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
-import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {ILiquidation} from "contracts/exchange/interfaces/ILiquidation.sol";
@@ -187,9 +187,7 @@ contract LiquidationExchangeTest is Test {
             ILiquidation.LiquidationParams({account: user, feePips: feePips, nonce: nonce, executions: executions});
 
         vm.prank(address(clearingService));
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: address(liquidationAsset), account: user, amount: 100});
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(user, address(liquidationAsset), 100);
 
         vm.prank(liquidator);
         vm.expectEmit(address(exchange));
@@ -238,9 +236,7 @@ contract LiquidationExchangeTest is Test {
             ILiquidation.LiquidationParams({account: user, feePips: feePips, nonce: nonce, executions: executions});
 
         vm.prank(address(clearingService));
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: address(liquidationAsset), account: user, amount: 100});
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(user, address(liquidationAsset), 100);
 
         vm.prank(liquidator);
         vm.expectEmit(address(exchange));
@@ -344,9 +340,7 @@ contract LiquidationExchangeTest is Test {
             ILiquidation.LiquidationParams({account: user, feePips: 200, nonce: nonce, executions: execs});
 
         vm.prank(address(clearingService));
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: liquidationAsset, account: user, amount: 100});
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(user, address(liquidationAsset), 100);
 
         vm.prank(address(exchange));
         vm.expectEmit(address(exchange));
@@ -401,9 +395,7 @@ contract LiquidationExchangeTest is Test {
         exchange.innerLiquidation(params);
 
         vm.prank(address(clearingService));
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: liquidationAsset, account: user, amount: -10});
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(user, address(liquidationAsset), -10);
 
         vm.prank(address(exchange));
         vm.expectRevert(
@@ -430,9 +422,7 @@ contract LiquidationExchangeTest is Test {
             ILiquidation.LiquidationParams({account: user, feePips: 50, nonce: 1, executions: execs});
 
         vm.prank(address(clearingService));
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: liquidationAsset, account: user, amount: 50});
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(user, address(liquidationAsset), 50);
 
         vm.prank(address(exchange));
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_UniversalRouter_EmptyCommand.selector));
@@ -455,9 +445,7 @@ contract LiquidationExchangeTest is Test {
             ILiquidation.LiquidationParams({account: user, feePips: 50, nonce: 1, executions: execs});
 
         vm.prank(address(clearingService));
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: liquidationAsset, account: user, amount: 50});
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(user, address(liquidationAsset), 50);
 
         vm.prank(address(exchange));
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_UniversalRouter_InvalidCommand.selector, 3));

@@ -14,7 +14,7 @@ import {WETH9Mock} from "../mock/WETH9.sol";
 import {BSX1000x, IBSX1000x} from "contracts/1000x/BSX1000x.sol";
 import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
-import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
@@ -838,14 +838,8 @@ contract BalanceExchangeTest is Test {
         uint128 amount = 5 * 1e18;
         (address account, uint256 accountKey) = makeAddrAndKey("account");
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: int128(amount)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(collateralToken), amount, true);
-            vm.stopPrank();
-        }
+        vm.prank(address(exchange));
+        clearingService.deposit(account, amount, address(collateralToken));
 
         int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), account);
         uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));
@@ -889,15 +883,8 @@ contract BalanceExchangeTest is Test {
         address contractAccount = address(new ERC1271(owner));
         uint128 amount = 5 * 1e18;
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] =
-                ISpot.AccountDelta({token: address(collateralToken), account: contractAccount, amount: int128(amount)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(collateralToken), amount, true);
-            vm.stopPrank();
-        }
+        vm.prank(address(exchange));
+        clearingService.deposit(contractAccount, amount, address(collateralToken));
 
         int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), contractAccount);
         uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));
@@ -970,14 +957,8 @@ contract BalanceExchangeTest is Test {
         uint128 amount = 5 * 1e18;
         (address account, uint256 accountKey) = makeAddrAndKey("account");
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(newToken), account: account, amount: int128(amount)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(newToken), amount, true);
-            vm.stopPrank();
-        }
+        vm.prank(address(exchange));
+        clearingService.deposit(account, amount, address(newToken));
 
         int256 accountBalanceStateBefore = spotEngine.getBalance(address(newToken), account);
         uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(newToken));
@@ -1119,15 +1100,8 @@ contract BalanceExchangeTest is Test {
         address contractAccount = address(new ERC1271(owner));
         uint128 amount = 5 * 1e18;
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] =
-                ISpot.AccountDelta({token: address(collateralToken), account: contractAccount, amount: int128(amount)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(collateralToken), amount, true);
-            vm.stopPrank();
-        }
+        vm.prank(address(exchange));
+        clearingService.deposit(contractAccount, amount, address(collateralToken));
 
         int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), contractAccount);
         uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));
@@ -1203,14 +1177,8 @@ contract BalanceExchangeTest is Test {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         uint128 amount = 5 * 1e18;
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: int128(amount)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(collateralToken), amount, true);
-            vm.stopPrank();
-        }
+        vm.prank(address(exchange));
+        clearingService.deposit(account, amount, address(collateralToken));
 
         vm.startPrank(sequencer);
 
@@ -1238,14 +1206,8 @@ contract BalanceExchangeTest is Test {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         uint128 balance = 5 * 1e18;
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: int128(balance)});
-            spotEngine.modifyAccount(deltas);
-            spotEngine.setTotalBalance(address(collateralToken), balance, true);
-            vm.stopPrank();
-        }
+        vm.prank(address(exchange));
+        clearingService.deposit(account, balance, address(collateralToken));
 
         int256 accountBalanceStateBefore = spotEngine.getBalance(address(collateralToken), account);
         uint256 totalBalanceStateBefore = spotEngine.getTotalBalance(address(collateralToken));

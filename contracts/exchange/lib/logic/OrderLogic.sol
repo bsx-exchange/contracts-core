@@ -139,10 +139,8 @@ library OrderLogic {
 
         rebate = fee.safeUInt128().calculatePercentage(referral.rebateRate);
 
-        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
         address token = isFeeInBSX ? BSX_TOKEN : engine.orderbook.getCollateralToken();
-        productDeltas[0] = ISpot.AccountDelta(token, referral.referrer, rebate.safeInt128());
-        engine.spot.modifyAccount(productDeltas);
+        engine.spot.updateBalance(referral.referrer, token, rebate.safeInt128());
 
         emit IExchange.RebateReferrer(referral.referrer, rebate, isFeeInBSX);
     }
@@ -158,10 +156,8 @@ library OrderLogic {
         }
 
         uint128 rebate = fee.abs();
-        ISpot.AccountDelta[] memory productDeltas = new ISpot.AccountDelta[](1);
         address token = isFeeInBSX ? BSX_TOKEN : engine.orderbook.getCollateralToken();
-        productDeltas[0] = ISpot.AccountDelta(token, maker, rebate.safeInt128());
-        engine.spot.modifyAccount(productDeltas);
+        engine.spot.updateBalance(maker, token, rebate.safeInt128());
 
         emit IExchange.RebateMaker(maker, rebate, isFeeInBSX);
 

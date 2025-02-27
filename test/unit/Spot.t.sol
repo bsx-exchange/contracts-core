@@ -34,19 +34,18 @@ contract SpotEngineTest is Test {
     function test_authorized() public {
         address anyAddr = makeAddr("anyAddress");
         int256 anyAmount = 100;
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta({token: anyAddr, account: anyAddr, amount: anyAmount});
+
         vm.prank(exchange);
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(anyAddr, anyAddr, anyAmount);
 
         vm.prank(clearingService);
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(anyAddr, anyAddr, anyAmount);
 
         vm.prank(orderBook);
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(anyAddr, anyAddr, anyAmount);
     }
 
-    function test_modifyAccount() public {
+    function test_updateBalance() public {
         vm.startPrank(exchange);
 
         address token = makeAddr("token");
@@ -54,63 +53,57 @@ contract SpotEngineTest is Test {
         accounts[0] = makeAddr("account_0");
         accounts[1] = makeAddr("account_1");
 
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-
         for (uint256 i = 0; i < accounts.length; i++) {
             assertEq(spotEngine.getBalance(token, accounts[i]), 0);
 
             int256 amount0 = 100;
-            ISpot.AccountDelta memory delta0 = ISpot.AccountDelta({token: token, account: accounts[i], amount: amount0});
-            deltas[0] = delta0;
             vm.expectEmit(address(spotEngine));
             emit ISpot.UpdateBalance(accounts[i], token, amount0, amount0);
-            spotEngine.modifyAccount(deltas);
+            spotEngine.updateBalance(accounts[i], token, amount0);
             assertEq(spotEngine.getBalance(token, accounts[i]), amount0);
 
             int256 amount1 = -300;
-            ISpot.AccountDelta memory delta1 = ISpot.AccountDelta({token: token, account: accounts[i], amount: amount1});
-            deltas[0] = delta1;
             vm.expectEmit(address(spotEngine));
             emit ISpot.UpdateBalance(accounts[i], token, amount1, amount0 + amount1);
-            spotEngine.modifyAccount(deltas);
+            spotEngine.updateBalance(accounts[i], token, amount1);
             assertEq(spotEngine.getBalance(token, accounts[i]), amount0 + amount1);
         }
     }
 
-    function test_modifyAccount_revertsWhenUnauthorized() public {
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](0);
+    function test_updateBalance_revertsWhenUnauthorized() public {
+        address anyAddr = makeAddr("anyAddress");
         vm.expectRevert(Errors.Unauthorized.selector);
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(anyAddr, anyAddr, 0);
     }
 
-    function test_setTotalBalance_increase() public {
+    function test_updateTotalBalance_increase() public {
         vm.startPrank(exchange);
 
         address token = makeAddr("token");
-        spotEngine.setTotalBalance(token, 100, true);
+        spotEngine.updateTotalBalance(token, 100);
         assertEq(spotEngine.getTotalBalance(token), 100);
     }
 
-    function test_setTotalBalance_increase_revertsWhenUnauthorized() public {
+    function test_updateTotalBalance_increase_revertsWhenUnauthorized() public {
         address token = makeAddr("token");
         vm.expectRevert(Errors.Unauthorized.selector);
-        spotEngine.setTotalBalance(token, 100, true);
+        spotEngine.updateTotalBalance(token, 100);
     }
 
-    function test_setTotalBalance_decrease() public {
+    function test_updateTotalBalance_decrease() public {
         vm.startPrank(exchange);
 
         address token = makeAddr("token");
-        spotEngine.setTotalBalance(token, 100, true);
+        spotEngine.updateTotalBalance(token, 100);
         assertEq(spotEngine.getTotalBalance(token), 100);
 
-        spotEngine.setTotalBalance(token, 50, false);
+        spotEngine.updateTotalBalance(token, -50);
         assertEq(spotEngine.getTotalBalance(token), 100 - 50);
     }
 
-    function test_setTotalBalance_decrease_revertsWhenUnauthorized() public {
+    function test_updateTotalBalance_decrease_revertsWhenUnauthorized() public {
         address token = makeAddr("token");
         vm.expectRevert(Errors.Unauthorized.selector);
-        spotEngine.setTotalBalance(token, 100, false);
+        spotEngine.updateTotalBalance(token, -100);
     }
 }

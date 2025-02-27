@@ -5,7 +5,7 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
-import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 
@@ -159,9 +159,7 @@ contract ClearingServiceTest is Test {
         clearingService.depositInsuranceFund(fund);
 
         int256 loss = -100;
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta(token, account, loss);
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(account, token, loss);
 
         clearingService.coverLossWithInsuranceFund(account, uint256(-loss));
         assertEq(spotEngine.getBalance(account, token), int256(0));
@@ -178,10 +176,7 @@ contract ClearingServiceTest is Test {
 
         uint256 balance = 100;
         clearingService.depositInsuranceFund(balance);
-
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta(token, account, int256(balance));
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(account, token, int256(balance));
 
         vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_NoLoss.selector, account, int256(balance)));
         clearingService.coverLossWithInsuranceFund(account, 10);
@@ -194,9 +189,7 @@ contract ClearingServiceTest is Test {
         clearingService.depositInsuranceFund(fund);
 
         int256 loss = -1000;
-        ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-        deltas[0] = ISpot.AccountDelta(token, account, loss);
-        spotEngine.modifyAccount(deltas);
+        spotEngine.updateBalance(account, token, loss);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.ClearingService_InsufficientFund.selector, uint256(-loss), fund));
         clearingService.coverLossWithInsuranceFund(account, uint256(-loss));

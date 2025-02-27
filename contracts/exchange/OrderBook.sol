@@ -195,10 +195,8 @@ contract OrderBook is IOrderBook, Initializable {
         return isNonceUsed[_userA][_nonceA] || isNonceUsed[_userB][_nonceB];
     }
 
-    /// @dev This internal function is used to call modify account function depends on the quote address.
-    /// If the quote address is QUOTE_ADDRESS, it will call perpEngine.modifyAccount.
-    /// Otherwise, it will call spotEngine.modifyAccount.
-    /// @param _accountDeltas The information of the account to modify
+    /// @dev This internal function is used to call modify trading account
+    /// @param _accountDeltas The trading account delta
     function _modifyAccounts(IPerp.AccountDelta[] memory _accountDeltas) internal {
         perpEngine.modifyAccount(_accountDeltas);
     }
@@ -255,26 +253,19 @@ contract OrderBook is IOrderBook, Initializable {
     }
 
     function _collectFeesInBSX(FeesInBSX memory feesInBSX, address maker, address taker) internal {
-        ISpot.AccountDelta[] memory accountDeltas;
-        if (feesInBSX.maker > 0 && feesInBSX.taker > 0) {
-            accountDeltas = new ISpot.AccountDelta[](2);
-            accountDeltas[0] = ISpot.AccountDelta(BSX_TOKEN, maker, -feesInBSX.maker);
-            accountDeltas[1] = ISpot.AccountDelta(BSX_TOKEN, taker, -feesInBSX.taker);
-        } else if (feesInBSX.maker > 0) {
-            accountDeltas = new ISpot.AccountDelta[](1);
-            accountDeltas[0] = ISpot.AccountDelta(BSX_TOKEN, maker, -feesInBSX.maker);
-        } else if (feesInBSX.taker > 0) {
-            accountDeltas = new ISpot.AccountDelta[](1);
-            accountDeltas[0] = ISpot.AccountDelta(BSX_TOKEN, taker, -feesInBSX.taker);
+        if (feesInBSX.maker > 0) {
+            spotEngine.updateBalance(maker, BSX_TOKEN, -feesInBSX.maker);
         }
-        spotEngine.modifyAccount(accountDeltas);
+
+        if (feesInBSX.taker > 0) {
+            spotEngine.updateBalance(taker, BSX_TOKEN, -feesInBSX.taker);
+        }
     }
 
     function _settleBalance(uint8 _productIndex, address _account, int128 _matchSize, int128 _quote, uint128 _price)
         internal
         returns (int128, int128)
     {
-        ISpot.AccountDelta[] memory accountDeltas = new ISpot.AccountDelta[](1);
         IPerp.Balance memory balance = perpEngine.getOpenPosition(_account, _productIndex);
         IPerp.FundingRate memory fundingRate = perpEngine.getFundingRate(_productIndex);
 
@@ -288,8 +279,8 @@ contract OrderBook is IOrderBook, Initializable {
         } else if (newSize == 0) {
             amountToSettle = newQuote;
         }
-        accountDeltas[0] = ISpot.AccountDelta(_collateralToken, _account, amountToSettle);
-        spotEngine.modifyAccount(accountDeltas);
+
+        spotEngine.updateBalance(_account, _collateralToken, amountToSettle);
         newQuote = newQuote - amountToSettle;
         return (newQuote, newSize);
     }

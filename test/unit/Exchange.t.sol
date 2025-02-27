@@ -13,7 +13,7 @@ import {ClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {IOrderBook, OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Perp} from "contracts/exchange/Perp.sol";
-import {ISpot, Spot} from "contracts/exchange/Spot.sol";
+import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
@@ -351,14 +351,10 @@ contract ExchangeTest is Test {
         uint128 loss = 5 * 1e18;
         uint128 insuranceFund = 100 * 1e18;
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: -int128(loss)});
-            spotEngine.modifyAccount(deltas);
-            clearingService.depositInsuranceFund(insuranceFund);
-            vm.stopPrank();
-        }
+        vm.startPrank(address(exchange));
+        spotEngine.updateBalance(account, address(collateralToken), -int128(loss));
+        clearingService.depositInsuranceFund(insuranceFund);
+        vm.stopPrank();
 
         bytes memory operation =
             _encodeDataToOperation(IExchange.OperationType.CoverLossByInsuranceFund, abi.encode(account, loss));
@@ -633,15 +629,10 @@ contract ExchangeTest is Test {
         address payer = makeAddr("payer");
         uint128 payerBalance = 10 * 1e18;
 
-        {
-            vm.startPrank(address(exchange));
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: -int128(loss)});
-            spotEngine.modifyAccount(deltas);
-
-            clearingService.deposit(payer, payerBalance, address(collateralToken));
-            vm.stopPrank();
-        }
+        vm.startPrank(address(exchange));
+        spotEngine.updateBalance(account, address(collateralToken), -int128(loss));
+        clearingService.deposit(payer, payerBalance, address(collateralToken));
+        vm.stopPrank();
 
         vm.expectEmit(address(exchange));
         emit IExchange.CoverLoss(account, payer, address(collateralToken), loss);
@@ -678,12 +669,8 @@ contract ExchangeTest is Test {
         uint128 loss = 5 * 1e18;
         address payer = makeAddr("payer");
 
-        {
-            ISpot.AccountDelta[] memory deltas = new ISpot.AccountDelta[](1);
-            deltas[0] = ISpot.AccountDelta({token: address(collateralToken), account: account, amount: -int128(loss)});
-            vm.prank(address(exchange));
-            spotEngine.modifyAccount(deltas);
-        }
+        vm.prank(address(exchange));
+        spotEngine.updateBalance(account, address(collateralToken), -int128(loss));
 
         vm.expectRevert(
             abi.encodeWithSelector(
