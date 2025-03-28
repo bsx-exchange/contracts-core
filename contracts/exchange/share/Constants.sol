@@ -6,7 +6,10 @@ import {IBsxOracle} from "contracts/misc/interfaces/IBsxOracle.sol";
 
 string constant NAME = "BSX Mainnet";
 string constant VERSION = "1";
+uint256 constant PRICE_SCALE = 1e18;
 uint8 constant STANDARDIZED_TOKEN_DECIMAL = 18;
+uint256 constant ZERO_NONCE = 0;
+address constant ZERO_ADDRESS = address(0);
 uint128 constant MAX_WITHDRAWAL_FEE = 1e18; // 1$
 uint128 constant MAX_TAKER_SEQUENCER_FEE_IN_USD = 1e18; // 1$
 uint16 constant MAX_REBATE_RATE = 10_000; // 100%

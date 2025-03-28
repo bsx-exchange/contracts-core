@@ -11,4 +11,6 @@ library Commands {
 
     uint256 internal constant V2_SWAP_EXACT_IN = 0x08;
     uint256 internal constant V2_SWAP_EXACT_OUT = 0x09;
+
+    bytes1 internal constant MORPHO_PULL_ASSET = 0xff;
 }

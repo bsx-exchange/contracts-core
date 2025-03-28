@@ -39,6 +39,7 @@ contract VaultManager is IVaultManager, Initializable {
     mapping(address vault => mapping(address account => StakerData data)) private _stakers;
     mapping(address account => mapping(uint256 nonce => bool used)) public isStakeNonceUsed;
     mapping(address account => mapping(uint256 nonce => bool used)) public isUnstakeNonceUsed;
+    mapping(address account => uint256 count) public vaultCount;
 
     modifier onlyExchange() {
         if (msg.sender != address(access.getExchange())) revert Errors.Unauthorized();
@@ -54,6 +55,26 @@ contract VaultManager is IVaultManager, Initializable {
     //     access = Access(_access);
     //     asset = _asset;
     // }
+
+    function syncVaultCount(address[] calldata vaults_, address[] calldata accounts_) public {
+        if (!access.hasRole(access.GENERAL_ROLE(), msg.sender)) {
+            revert Errors.Unauthorized();
+        }
+        for (uint256 i = 0; i < accounts_.length; i++) {
+            address account = accounts_[i];
+            uint256 count = 0;
+
+            for (uint256 j = 0; j < vaults_.length; j++) {
+                address vault = vaults_[j];
+                StakerData storage staker = _stakers[vault][account];
+                if (staker.shares > 0) {
+                    count++;
+                }
+            }
+
+            vaultCount[account] = count;
+        }
+    }
 
     /// @inheritdoc IVaultManager
     function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes memory signature)
@@ -105,6 +126,8 @@ contract VaultManager is IVaultManager, Initializable {
         isVault(vault)
         returns (uint256)
     {
+        _assertMainAccount(account);
+
         if (token != asset) {
             revert Errors.Vault_InvalidToken(token, asset);
         }
@@ -142,6 +165,10 @@ contract VaultManager is IVaultManager, Initializable {
         staker.shares += mintShares;
 
         vaultData.totalShares += mintShares;
+
+        if (prevShares == 0 && mintShares > 0) {
+            vaultCount[account]++;
+        }
 
         access.getClearingService().withdraw(account, amount, asset);
         access.getClearingService().deposit(vault, amount, asset);
@@ -195,6 +222,10 @@ contract VaultManager is IVaultManager, Initializable {
         staker.shares -= shares;
         vaultData.totalShares -= shares;
 
+        if (staker.shares == 0 && shares > 0 && vaultCount[account] > 0) {
+            vaultCount[account]--;
+        }
+
         access.getClearingService().deposit(account, amount - fee, asset);
         access.getClearingService().withdraw(vault, amount, asset);
     }
@@ -247,6 +278,14 @@ contract VaultManager is IVaultManager, Initializable {
     /// @inheritdoc IVaultManager
     function isRegistered(address vault) public view override returns (bool) {
         return _vaultConfig[vault].isRegistered;
+    }
+
+    /// @dev Assert that the account is a main account
+    function _assertMainAccount(address account) private view {
+        IExchange.AccountType accountType = access.getExchange().getAccountType(account);
+        if (accountType != IExchange.AccountType.Main) {
+            revert Errors.Exchange_InvalidAccountType(account);
+        }
     }
 
     /// @dev If the total assets of a vault are negative, staker will need to cover the loss first

@@ -15,6 +15,7 @@ contract Perp is IPerp, Initializable {
 
     mapping(address account => mapping(uint8 productId => Balance balance)) public balance;
     mapping(uint8 productId => FundingRate marketMetrics) public fundingRate;
+    mapping(address account => uint256 openPos) public openPositions;
 
     // function initialize(address _access) public initializer {
     //     if (_access == address(0)) {
@@ -33,6 +34,24 @@ contract Perp is IPerp, Initializable {
         _;
     }
 
+    function syncOpenPositions(address[] calldata accounts, uint256 totalProducts) external onlySequencer {
+        if (!access.hasRole(access.GENERAL_ROLE(), msg.sender)) {
+            revert Errors.Unauthorized();
+        }
+
+        totalProducts += 1;
+        for (uint256 i = 0; i < accounts.length; i++) {
+            address account = accounts[i];
+            uint256 openPos = 0;
+            for (uint8 productId = 0; productId < totalProducts; productId++) {
+                if (balance[account][productId].size != 0) {
+                    openPos++;
+                }
+            }
+            openPositions[account] = openPos;
+        }
+    }
+
     /// @inheritdoc IPerp
     function modifyAccount(IPerp.AccountDelta[] calldata _accountDeltas) external onlySequencer {
         uint64 length = uint64(_accountDeltas.length);
@@ -44,9 +63,17 @@ contract Perp is IPerp, Initializable {
             FundingRate memory _fundingRate = fundingRate[_productIndex];
             Balance memory _balance = balance[accountDelta.account][_productIndex];
 
+            int256 prevSize = _balance.size;
             _updateAccountBalance(_fundingRate, _balance, amount, quote);
             balance[accountDelta.account][_productIndex] = _balance;
             fundingRate[_productIndex] = _fundingRate;
+            int256 newSize = _balance.size;
+
+            if (prevSize == 0 && newSize != 0) {
+                openPositions[accountDelta.account] += 1;
+            } else if (prevSize != 0 && newSize == 0 && openPositions[accountDelta.account] > 0) {
+                openPositions[accountDelta.account] -= 1;
+            }
         }
     }
 

@@ -70,4 +70,7 @@ interface IVaultManager {
 
     /// @notice Checks if an unstake nonce is used
     function isUnstakeNonceUsed(address account, uint256 nonce) external view returns (bool);
+
+    /// @notice Returns the number of vaults an account has joined
+    function vaultCount(address account) external view returns (uint256);
 }

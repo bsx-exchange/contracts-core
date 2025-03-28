@@ -49,6 +49,8 @@ contract OrderExchangeTest is Test {
     Perp private perpEngine;
     Spot private spotEngine;
 
+    bytes32 private constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
+    bytes32 private constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
     bytes32 private constant ORDER_TYPEHASH =
         keccak256("Order(address sender,uint128 size,uint128 price,uint64 nonce,uint8 productIndex,uint8 orderSide)");
 
@@ -1788,10 +1790,10 @@ contract OrderExchangeTest is Test {
         }
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         bytes memory authorizeSignerData =

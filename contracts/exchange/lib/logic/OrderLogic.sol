@@ -38,8 +38,16 @@ library OrderLogic {
         keccak256("Order(address sender,uint128 size,uint128 price,uint64 nonce,uint8 productIndex,uint8 orderSide)");
 
     /// @notice Match two non-liquidation orders
-    function matchOrders(IExchange exchange, OrderEngine calldata engine, bytes calldata data) external {
+    function matchOrders(
+        mapping(address account => IExchange.Account data) storage accounts,
+        IExchange exchange,
+        OrderEngine calldata engine,
+        bytes calldata data
+    ) external {
         WrappedData memory wd = _decodeData(data);
+
+        _assertActiveAccount(accounts, wd.maker.order.sender);
+        _assertActiveAccount(accounts, wd.taker.order.sender);
 
         wd.maker.order.orderHash = _getOrderDigest(exchange.hashTypedDataV4, wd.maker.order);
         GenericLogic.verifySignature(wd.maker.signer, wd.maker.order.orderHash, wd.maker.signature);
@@ -72,8 +80,15 @@ library OrderLogic {
     }
 
     /// @notice Match a liquidation order with a non-liquidation order
-    function matchLiquidationOrders(IExchange exchange, OrderEngine calldata engine, bytes calldata data) external {
+    function matchLiquidationOrders(
+        mapping(address account => IExchange.Account data) storage accounts,
+        IExchange exchange,
+        OrderEngine calldata engine,
+        bytes calldata data
+    ) external {
         WrappedData memory wd = _decodeData(data);
+
+        _assertActiveAccount(accounts, wd.maker.order.sender);
 
         wd.maker.order.orderHash = _getOrderDigest(exchange.hashTypedDataV4, wd.maker.order);
         GenericLogic.verifySignature(wd.maker.signer, wd.maker.order.orderHash, wd.maker.signature);
@@ -102,6 +117,16 @@ library OrderLogic {
         engine.orderbook.matchOrders(
             wd.maker.order.productIndex, wd.maker.order, wd.taker.order, wd.fees, wd.taker.isLiquidation
         );
+    }
+
+    /// @dev Assert that the account is active
+    function _assertActiveAccount(mapping(address account => IExchange.Account data) storage accounts, address account)
+        internal
+        view
+    {
+        if (accounts[account].state != IExchange.AccountState.Active) {
+            revert Errors.Exchange_AccountNotActive(account);
+        }
     }
 
     /// @dev Hash an order using EIP712

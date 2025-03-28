@@ -5,6 +5,7 @@ import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet
 
 import {Access} from "./access/Access.sol";
 import {IClearingService} from "./interfaces/IClearingService.sol";
+import {IExchange} from "./interfaces/IExchange.sol";
 import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IPerp} from "./interfaces/IPerp.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
@@ -42,4 +43,6 @@ abstract contract ExchangeStorage {
     bool public pauseBatchProcess;
     mapping(address account => mapping(uint64 withdrawNonce => bool used)) public isWithdrawNonceUsed;
     mapping(address account => mapping(uint256 swapNonce => bool used)) public isSwapNonceUsed;
+    mapping(address account => mapping(uint256 nonce => bool used)) internal _isNonceUsed;
+    mapping(address account => IExchange.Account data) internal _accounts;
 }
