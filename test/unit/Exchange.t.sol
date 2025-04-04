@@ -2,6 +2,7 @@
 pragma solidity >=0.8.25 <0.9.0;
 
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Helper} from "../Helper.sol";
@@ -46,6 +47,10 @@ contract ExchangeTest is Test {
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
+    bytes32 private constant REGISTER_SUBACCOUNT_SIGNER_TYPEHASH =
+        keccak256("RegisterSubaccountSigner(address main,address subaccount,string message,uint64 nonce)");
+    bytes32 private constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
 
     function setUp() public {
         vm.startPrank(sequencer);
@@ -217,10 +222,10 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         bytes memory addSigningWalletData =
@@ -247,10 +252,10 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 contractAccountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory ownerSignature = _signTypedDataHash(ownerKey, contractAccountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), contractAccount));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, contractAccount));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         bytes memory addSigningWalletData = abi.encode(
@@ -280,10 +285,10 @@ contract ExchangeTest is Test {
         // signed by malicious account
         bytes memory maliciousAccountSignature = _signTypedDataHash(
             maliciousAccountKey,
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), 1))
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), 1))
         );
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         bytes memory addSigningWalletData = abi.encode(
@@ -306,11 +311,11 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
         // signed by malicious signer
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory maliciousSignerSignature = _signTypedDataHash(maliciousSignerKey, signerStructHash);
 
         bytes memory addSigningWalletData = abi.encode(
@@ -334,10 +339,10 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         bytes memory addSigningWalletData =
@@ -443,7 +448,7 @@ contract ExchangeTest is Test {
 
         // this is a deprecated operation type
         bytes memory invalidOperation =
-            _encodeDataToOperation(IExchange.OperationType._SetMarketMaker, abi.encodePacked());
+            _encodeDataToOperation(IExchange.OperationType._UpdateLiquidationFeeRate, abi.encodePacked());
 
         vm.expectRevert(Errors.Exchange_InvalidOperationType.selector);
         exchange.processBatch(invalidOperation.toArray());
@@ -480,10 +485,10 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         vm.expectEmit(address(exchange));
@@ -506,10 +511,10 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 contractAccountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory ownerSignature = _signTypedDataHash(ownerKey, contractAccountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), contractAccount));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, contractAccount));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         vm.expectEmit(address(exchange));
@@ -534,10 +539,10 @@ contract ExchangeTest is Test {
         // signed by malicious account
         bytes memory maliciousAccountSignature = _signTypedDataHash(
             maliciousAccountKey,
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), 1))
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), 1))
         );
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidSignature.selector, account));
@@ -555,11 +560,11 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
         // signed by malicious signer
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory maliciousSignerSignature = _signTypedDataHash(maliciousSignerKey, signerStructHash);
 
         vm.expectRevert(
@@ -578,10 +583,10 @@ contract ExchangeTest is Test {
         uint64 nonce = 1;
 
         bytes32 accountStructHash =
-            keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
         bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
-        bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+        bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
         bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
         exchange.registerSigningWallet(account, signer, message, nonce, accountSignature, signerSignature);
@@ -602,10 +607,10 @@ contract ExchangeTest is Test {
             uint64 nonce = 1;
 
             bytes32 accountStructHash =
-                keccak256(abi.encode(exchange.REGISTER_TYPEHASH(), signer, keccak256(abi.encodePacked(message)), nonce));
+                keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(message)), nonce));
             bytes memory accountSignature = _signTypedDataHash(accountKey, accountStructHash);
 
-            bytes32 signerStructHash = keccak256(abi.encode(exchange.SIGN_KEY_TYPEHASH(), account));
+            bytes32 signerStructHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, account));
             bytes memory signerSignature = _signTypedDataHash(signerKey, signerStructHash);
 
             bytes memory addSigningWalletData = abi.encode(

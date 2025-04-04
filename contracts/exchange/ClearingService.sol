@@ -53,6 +53,15 @@ contract ClearingService is IClearingService, Initializable {
     }
 
     /// @inheritdoc IClearingService
+    function transfer(address from, address to, int256 amount, address token) external onlySequencer {
+        ISpot spotEngine = access.getSpotEngine();
+        // withdraw `amount` from `from` account
+        spotEngine.updateBalance(from, token, -amount);
+        // deposit `amount` to `to` account
+        spotEngine.updateBalance(to, token, amount);
+    }
+
+    /// @inheritdoc IClearingService
     function collectLiquidationFee(address account, uint64 nonce, uint256 amount, bool isFeeInBSX)
         external
         onlySequencer

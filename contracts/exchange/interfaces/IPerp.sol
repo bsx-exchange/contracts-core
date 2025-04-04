@@ -45,4 +45,9 @@ interface IPerp {
     /// @param productIndex Product Id
     /// @return Funding rate of the market
     function getFundingRate(uint8 productIndex) external view returns (FundingRate memory);
+
+    /// @notice Gets the number of open positions of an account
+    /// @param account Account address
+    /// @return Number of open positions
+    function openPositions(address account) external view returns (uint256);
 }

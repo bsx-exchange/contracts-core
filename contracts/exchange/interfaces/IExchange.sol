@@ -20,6 +20,12 @@ interface IExchange is ILiquidation, ISwap {
     /// @dev Emitted when an account authorizes a signer to sign on its behalf
     event RegisterSigner(address indexed account, address indexed signer, uint64 nonce);
 
+    /// @notice Emitted when a subaccount is created
+    event CreateSubaccount(address indexed main, address indexed subaccount);
+
+    /// @notice Emitted when a subaccount is deleted
+    event DeleteSubaccount(address indexed main, address indexed subaccount, ActionStatus status);
+
     /// @dev Emitted when a user deposits tokens to the exchange
     /// @param token Token address
     /// @param user  User address
@@ -50,6 +56,24 @@ interface IExchange is ILiquidation, ISwap {
     /// @param amount Withdraw amount (in 18 decimals)
     /// @param balance Balance of account after withdraw (in 18 decimals)
     event WithdrawFailed(address indexed user, uint64 indexed nonce, uint128 amount, int256 balance);
+
+    /// @dev Emitted when a user deposits tokens to the exchange
+    /// @param token Token address
+    /// @param from From address
+    /// @param to To address
+    /// @param signer Signer address who signed the transfer
+    /// @param nonce Nonce of the transfer
+    /// @param amount Deposit amount (in 18 decimals)
+    /// @param status Transfer status
+    event Transfer(
+        address indexed token,
+        address indexed from,
+        address indexed to,
+        address signer,
+        uint256 nonce,
+        int256 amount,
+        ActionStatus status
+    );
 
     /// @dev Emitted when a user transfer collateral to BSX1000
     /// @param token Token address
@@ -122,6 +146,17 @@ interface IExchange is ILiquidation, ISwap {
     /// @notice Emitted when a new vault is registered
     event RegisterVault(address indexed vault, address indexed feeRecipient, uint256 profitShareBps);
 
+    enum AccountType {
+        Main,
+        Vault,
+        Subaccount
+    }
+
+    enum AccountState {
+        Active,
+        Deleted
+    }
+
     /// @notice Emitted then user stakes to vault
     event StakeVault(
         address indexed vault,
@@ -146,6 +181,11 @@ interface IExchange is ILiquidation, ISwap {
         VaultActionStatus status
     );
 
+    enum ActionStatus {
+        Success,
+        Failure
+    }
+
     enum TransferToBSX1000Status {
         Success,
         Failure
@@ -168,14 +208,31 @@ interface IExchange is ILiquidation, ISwap {
         _UpdateLiquidationFeeRate, // deprecated
         _ClaimFee, // deprecated
         _WithdrawInsuranceFundEmergency, // deprecated
-        _SetMarketMaker, // deprecated
-        _UpdateSequencerFee, // deprecated
+        DeleteSubaccount,
+        Transfer,
         AddSigningWallet,
-        _ClaimSequencerFees, // deprecated
+        RegisterSubaccountSigner,
         Withdraw,
         TransferToBSX1000,
         StakeVault,
         UnstakeVault
+    }
+
+    struct TransferParams {
+        address from;
+        address to;
+        address token;
+        uint256 amount;
+        uint256 nonce;
+        bytes signature;
+    }
+
+    /// @notice Account information
+    struct Account {
+        address main;
+        AccountType accountType;
+        AccountState state;
+        address[] subaccounts;
     }
 
     /// @notice Authorizes a wallet to sign on behalf of the sender
@@ -185,6 +242,17 @@ interface IExchange is ILiquidation, ISwap {
         string message;
         uint64 nonce;
         bytes walletSignature;
+        bytes signerSignature;
+    }
+
+    /// @notice Authorizes a signer to sign on behalf of the subaccount
+    struct RegisterSubaccountSignerParams {
+        address main;
+        address subaccount;
+        address signer;
+        string message;
+        uint64 nonce;
+        bytes mainSignature;
         bytes signerSignature;
     }
 
@@ -225,6 +293,12 @@ interface IExchange is ILiquidation, ISwap {
         bytes signature;
     }
 
+    struct DeleteSubaccountParams {
+        address main;
+        address subaccount;
+        bytes mainSignature;
+    }
+
     /// @notice Adds the supported token. Only admin can call this function
     /// @dev Emits a {SupportedTokenAdded} event
     /// @param token Token address
@@ -242,6 +316,13 @@ interface IExchange is ILiquidation, ISwap {
     /// @param asset Asset address
     /// @return Cover amount
     function coverLoss(address account, address payer, address asset) external returns (uint256);
+
+    /// @notice Creates a subaccount for the main account
+    /// Main account is the owner of the subaccount and can transfer assets to the subaccount
+    /// A main account can have multiple subaccounts, but a subaccount can only have one main account
+    /// @dev Emits a {CreateSubaccount} event
+    function createSubaccount(address main, address subaccount, bytes memory mainSignature, bytes memory subSignature)
+        external;
 
     /// @notice Registers account as a vault
     /// @param vault Vault address
@@ -329,6 +410,9 @@ interface IExchange is ILiquidation, ISwap {
     /// @notice Sets the withdraw flag, only admin can call this function
     function setCanWithdraw(bool canWithdraw) external;
 
+    /// @notice Returns the account information
+    function accounts(address account) external view returns (Account memory);
+
     /// @dev This function get the balance of user
     /// @param user User address
     /// @return Amount of token
@@ -341,6 +425,16 @@ interface IExchange is ILiquidation, ISwap {
     /// @notice Gets the supported token list
     /// @return List of supported token
     function getSupportedTokenList() external view returns (address[] memory);
+
+    /// @notice Gets the account type
+    /// @param account Account address
+    /// @return Account type
+    function getAccountType(address account) external view returns (AccountType);
+
+    /// @notice Gets the subaccounts of the main account
+    /// @param main Main account address
+    /// @return List of subaccounts
+    function getSubaccounts(address main) external view returns (address[] memory);
 
     /// @notice Gets collected trading fees
     function getTradingFees() external view returns (IOrderBook.FeeCollection memory);
@@ -367,4 +461,7 @@ interface IExchange is ILiquidation, ISwap {
 
     /// @notice Checks whether the nonce is used for unstaking from vault or not
     function isUnstakeVaultNonceUsed(address account, uint256 nonce) external view returns (bool);
+
+    /// @notice Checks whether the nonce is used or not
+    function isNonceUsed(address account, uint256 nonce) external view returns (bool);
 }

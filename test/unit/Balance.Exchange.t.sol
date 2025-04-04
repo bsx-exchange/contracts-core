@@ -12,8 +12,9 @@ import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 import {WETH9Mock} from "../mock/WETH9.sol";
 
 import {BSX1000x, IBSX1000x} from "contracts/1000x/BSX1000x.sol";
-import {ClearingService} from "contracts/exchange/ClearingService.sol";
+import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
+import {OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
@@ -29,6 +30,7 @@ contract BalanceExchangeTest is Test {
     using Helper for uint128;
     using MathHelper for int128;
     using MathHelper for uint128;
+    using MathHelper for uint256;
 
     address private sequencer = makeAddr("sequencer");
 
@@ -37,12 +39,16 @@ contract BalanceExchangeTest is Test {
     Access private access;
     Exchange private exchange;
     ClearingService private clearingService;
+    OrderBook private orderbook;
     Spot private spotEngine;
 
     BSX1000x private bsx1000;
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
+    bytes32 private constant CREATE_SUBACCOUNT_TYPEHASH = keccak256("CreateSubaccount(address main,address subaccount)");
+    bytes32 public constant TRANSFER_TYPEHASH =
+        keccak256("Transfer(address from,address to,address token,uint256 amount,uint256 nonce)");
     bytes32 private constant TRANSFER_TO_BSX1000_TYPEHASH =
         keccak256("TransferToBSX1000(address account,address token,uint256 amount,uint256 nonce)");
     bytes32 private constant WITHDRAW_TYPEHASH =
@@ -68,6 +74,10 @@ contract BalanceExchangeTest is Test {
         spotEngine = new Spot();
         stdstore.target(address(spotEngine)).sig("access()").checked_write(address(access));
 
+        orderbook = new OrderBook();
+        stdstore.target(address(orderbook)).sig("access()").checked_write(address(access));
+        stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(address(collateralToken));
+
         exchange = new Exchange();
         bytes memory code = address(new UniversalSigValidator()).code;
         vm.etch(address(UNIVERSAL_SIG_VALIDATOR), code);
@@ -77,11 +87,13 @@ contract BalanceExchangeTest is Test {
         stdstore.target(address(bsx1000)).sig("collateralToken()").checked_write(address(collateralToken));
 
         access.setExchange(address(exchange));
+        access.setOrderBook(address(orderbook));
         access.setClearingService(address(clearingService));
         access.setSpotEngine(address(spotEngine));
         access.setBsx1000(address(bsx1000));
 
         stdstore.target(address(exchange)).sig("access()").checked_write(address(access));
+        stdstore.target(address(exchange)).sig("book()").checked_write(address(orderbook));
         stdstore.target(address(exchange)).sig("clearingService()").checked_write(address(clearingService));
         stdstore.target(address(exchange)).sig("spotEngine()").checked_write(address(spotEngine));
         exchange.setCanDeposit(true);
@@ -597,23 +609,6 @@ contract BalanceExchangeTest is Test {
         );
     }
 
-    function test_processBatch_transferToBSX1000_revertsIfAccountIsVault() public {
-        address vault = _registerVault();
-        uint128 amount = 300 * 1e18;
-        uint64 nonce = 1;
-        bytes memory signature;
-
-        bytes memory operation = _encodeDataToOperation(
-            IExchange.OperationType.TransferToBSX1000,
-            abi.encode(IExchange.TransferToBSX1000Params(vault, address(collateralToken), amount, nonce, signature))
-        );
-
-        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
-
-        vm.startPrank(sequencer);
-        exchange.processBatch(operation.toArray());
-    }
-
     function test_processBatch_transferToBSX1000_revertsIfNonceUsed() public {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         uint128 amount = 300 * 1e18;
@@ -637,7 +632,29 @@ contract BalanceExchangeTest is Test {
             IExchange.OperationType.TransferToBSX1000,
             abi.encode(IExchange.TransferToBSX1000Params(account, address(collateralToken), amount, nonce, signature))
         );
+
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_TransferToBSX1000_NonceUsed.selector, account, nonce));
+
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transferToBSX1000_emitsFailedEventIfAccountIsVault() public {
+        address vault = _registerVault();
+        uint128 amount = 300 * 1e18;
+        uint64 nonce = 1;
+        bytes memory signature;
+
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.TransferToBSX1000,
+            abi.encode(IExchange.TransferToBSX1000Params(vault, address(collateralToken), amount, nonce, signature))
+        );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.TransferToBSX1000(
+            address(collateralToken), vault, nonce, amount, 0, IExchange.TransferToBSX1000Status.Failure
+        );
+
+        vm.startPrank(sequencer);
         exchange.processBatch(operation.toArray());
     }
 
@@ -777,7 +794,7 @@ contract BalanceExchangeTest is Test {
         assertEq(collateralToken.balanceOf(address(bsx1000)), bsx1000BalanceBefore);
     }
 
-    function test_processBatch_transferToBSX1000_revertsIfZeroAmount() public {
+    function test_processBatch_transferToBSX1000_emitsFailedEventIfZeroAmount() public {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         uint128 balance = 300 * 1e18;
         _prepareDeposit(address(this), balance);
@@ -824,12 +841,6 @@ contract BalanceExchangeTest is Test {
         assertEq(collateralToken.balanceOf(account), accountBalanceBefore);
         assertEq(collateralToken.balanceOf(address(exchange)), exchangeBalanceBefore);
         assertEq(collateralToken.balanceOf(address(bsx1000)), bsx1000BalanceBefore);
-    }
-
-    function test_innerTransferToBSX1000_revertsIfCallerNotContract() public {
-        IExchange.TransferToBSX1000Params memory emptyParams;
-        vm.expectRevert(Errors.Exchange_InternalCall.selector);
-        exchange.innerTransferToBSX1000(emptyParams);
     }
 
     function test_processBatch_withdraw_EOA() public {
@@ -927,25 +938,6 @@ contract BalanceExchangeTest is Test {
         );
     }
 
-    function test_processBatch_withdraw_revertsIfRecipientIsVault() public {
-        address vault = _registerVault();
-        uint128 amount = 300 * 1e18;
-        uint64 nonce = 1;
-        uint128 withdrawFee = 1 * 1e16;
-        bytes memory signature;
-
-        // deposit to vault
-        bytes memory operation = _encodeDataToOperation(
-            IExchange.OperationType.Withdraw,
-            abi.encode(IExchange.Withdraw(vault, address(collateralToken), amount, nonce, signature, withdrawFee))
-        );
-
-        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
-
-        vm.prank(sequencer);
-        exchange.processBatch(operation.toArray());
-    }
-
     function test_processBatch_withdraw_notUnderlyingToken() public {
         ERC20Simple newToken = new ERC20Simple(6);
 
@@ -1036,7 +1028,20 @@ contract BalanceExchangeTest is Test {
         assertEq(ERC20Simple(WETH9).balanceOf(address(exchange)), exchangeBalanceBefore - netAmount);
     }
 
-    function test_processBatch_withdraw_nativeETH_revertsIfSmartContract() public {
+    function test_processBatch_withdraw_revertsIfDisabledWithdraw() public {
+        vm.startPrank(sequencer);
+        exchange.setCanWithdraw(false);
+
+        address account = makeAddr("account");
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.Withdraw,
+            abi.encode(IExchange.Withdraw(account, address(collateralToken), 100, 0, "", 0))
+        );
+        vm.expectRevert(Errors.Exchange_DisabledWithdraw.selector);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_withdraw_nativeETH_emitsFailedEventIfSmartContract() public {
         bytes memory code = address(new WETH9Mock()).code;
         vm.etch(WETH9, code);
 
@@ -1080,20 +1085,27 @@ contract BalanceExchangeTest is Test {
         assertEq(ERC20Simple(WETH9).balanceOf(address(exchange)), exchangeBalanceBefore);
     }
 
-    function test_processBatch_withdraw_revertsIfDisabledWithdraw() public {
-        vm.startPrank(sequencer);
-        exchange.setCanWithdraw(false);
+    function test_processBatch_withdraw_emitsFailedEventIfRecipientIsVault() public {
+        address vault = _registerVault();
+        uint128 amount = 300 * 1e18;
+        uint64 nonce = 1;
+        uint128 withdrawFee = 1 * 1e16;
+        bytes memory signature;
 
-        address account = makeAddr("account");
+        // deposit to vault
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
-            abi.encode(IExchange.Withdraw(account, address(collateralToken), 100, 0, "", 0))
+            abi.encode(IExchange.Withdraw(vault, address(collateralToken), amount, nonce, signature, withdrawFee))
         );
-        vm.expectRevert(Errors.Exchange_DisabledWithdraw.selector);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.WithdrawFailed(vault, nonce, 0, 0);
+
+        vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
     }
 
-    function test_processBatch_withdraw_smartContract_revertsIfInvalidSignature() public {
+    function test_processBatch_withdraw_smartContract_emitsFailedEventIfInvalidSignature() public {
         collateralToken.mint(address(exchange), type(uint128).max);
 
         (address owner, uint256 ownerKey) = makeAddrAndKey("owner");
@@ -1137,7 +1149,7 @@ contract BalanceExchangeTest is Test {
         assertEq(collateralToken.balanceOf(address(exchange)), exchangeBalanceBefore);
     }
 
-    function test_processBatch_withdraw_revertsIfExceededMaxFee() public {
+    function test_processBatch_withdraw_emitsFailedEventIfExceededMaxFee() public {
         vm.startPrank(sequencer);
 
         (address account, uint256 accountKey) = makeAddrAndKey("account");
@@ -1149,15 +1161,20 @@ contract BalanceExchangeTest is Test {
         );
 
         // fee on stable tokens
+        nonce++;
         uint128 invalidFee = 1 ether + 1;
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.Withdraw,
             abi.encode(IExchange.Withdraw(account, address(collateralToken), amount, nonce, signature, invalidFee))
         );
-        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 1 ether));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.WithdrawFailed(account, nonce, 0, 0);
+
         exchange.processBatch(operation.toArray());
 
         // fee on weth
+        nonce++;
         signature =
             _signTypedDataHash(accountKey, keccak256(abi.encode(WITHDRAW_TYPEHASH, account, WETH9, amount, nonce)));
         invalidFee = 0.001 ether + 1;
@@ -1165,9 +1182,10 @@ contract BalanceExchangeTest is Test {
             IExchange.OperationType.Withdraw,
             abi.encode(IExchange.Withdraw(account, WETH9, amount, nonce, signature, invalidFee))
         );
-        vm.expectRevert(
-            abi.encodeWithSelector(Errors.Exchange_ExceededMaxWithdrawFee.selector, invalidFee, 0.001 ether)
-        );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.WithdrawFailed(account, nonce, 0, 0);
+
         exchange.processBatch(operation.toArray());
     }
 
@@ -1196,11 +1214,13 @@ contract BalanceExchangeTest is Test {
             IExchange.OperationType.Withdraw,
             abi.encode(IExchange.Withdraw(account, address(collateralToken), amount, nonce, signature, 0))
         );
+
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Withdraw_NonceUsed.selector, account, nonce));
+
         exchange.processBatch(operation.toArray());
     }
 
-    function test_processBatch_withdraw_revertsIfWithdrawAmountExceedBalance() public {
+    function test_processBatch_withdraw_emitsFailedEventIfWithdrawAmountExceedBalance() public {
         collateralToken.mint(address(exchange), type(uint128).max);
 
         (address account, uint256 accountKey) = makeAddrAndKey("account");
@@ -1227,7 +1247,7 @@ contract BalanceExchangeTest is Test {
             abi.encode(IExchange.Withdraw(account, address(collateralToken), withdrawAmount, nonce, signature, 0));
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Withdraw, data);
         vm.expectEmit(address(exchange));
-        emit IExchange.WithdrawFailed(account, nonce, withdrawAmount, int128(balance));
+        emit IExchange.WithdrawFailed(account, nonce, 0, 0);
         exchange.processBatch(operation.toArray());
 
         assertEq(exchange.isWithdrawNonceUsed(account, nonce), true);
@@ -1236,6 +1256,282 @@ contract BalanceExchangeTest is Test {
 
         assertEq(collateralToken.balanceOf(account), accountBalanceBefore);
         assertEq(collateralToken.balanceOf(address(exchange)), exchangeBalanceBefore);
+    }
+
+    function test_processBatch_transfer_mainToMain_succeeds() public {
+        // main -> main
+        (address main1, uint256 main1Key) = makeAddrAndKey("main1");
+        (address main2,) = makeAddrAndKey("main2");
+
+        uint256 amount = 300e18;
+        _deposit(main1, address(collateralToken), amount);
+
+        uint64 nonce = 1;
+        uint256 transferAmount1 = 100e18;
+        bytes memory signature = _signTypedDataHash(
+            main1Key,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main1, main2, address(collateralToken), transferAmount1, nonce))
+        );
+        bytes memory data = abi.encode(
+            IExchange.TransferParams(main1, main2, address(collateralToken), transferAmount1, nonce, signature)
+        );
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main1,
+            main2,
+            main1,
+            nonce,
+            int256(transferAmount1),
+            IExchange.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isNonceUsed(main1, nonce), true);
+
+        assertEq(spotEngine.getBalance(address(collateralToken), main1), int256(amount - transferAmount1));
+        assertEq(spotEngine.getBalance(address(collateralToken), main2), int256(transferAmount1));
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), amount);
+
+        assertEq(collateralToken.balanceOf(main1), 0);
+        assertEq(collateralToken.balanceOf(main2), 0);
+        assertEq(collateralToken.balanceOf(address(exchange)), amount.convertFromScale(address(collateralToken)));
+
+        // main (has sub) -> main
+        (address sub1, uint256 sub1Key) = makeAddrAndKey("sub1");
+        _createSubaccount(main1, main1Key, sub1, sub1Key);
+        nonce = 2;
+        uint256 transferAmount2 = 50e18;
+        signature = _signTypedDataHash(
+            main1Key,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main1, main2, address(collateralToken), transferAmount2, nonce))
+        );
+        data = abi.encode(
+            IExchange.TransferParams(main1, main2, address(collateralToken), transferAmount2, nonce, signature)
+        );
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main1,
+            main2,
+            main1,
+            nonce,
+            int256(transferAmount2),
+            IExchange.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isNonceUsed(main1, nonce), true);
+
+        assertEq(
+            spotEngine.getBalance(address(collateralToken), main1), int256(amount - transferAmount1 - transferAmount2)
+        );
+        assertEq(spotEngine.getBalance(address(collateralToken), main2), int256(transferAmount1 + transferAmount2));
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), amount);
+
+        assertEq(collateralToken.balanceOf(main1), 0);
+        assertEq(collateralToken.balanceOf(main2), 0);
+        assertEq(collateralToken.balanceOf(address(exchange)), amount.convertFromScale(address(collateralToken)));
+    }
+
+    function test_processBatch_transfer_mainToSub_succeeds() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        (address sub, uint256 subKey) = makeAddrAndKey("sub");
+        _createSubaccount(main, mainKey, sub, subKey);
+
+        uint256 amount = 300e18;
+        _deposit(main, address(collateralToken), amount);
+
+        uint64 nonce = 1;
+        uint256 transferAmount = 100e18;
+        bytes memory signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main, sub, address(collateralToken), transferAmount, nonce))
+        );
+        bytes memory data =
+            abi.encode(IExchange.TransferParams(main, sub, address(collateralToken), transferAmount, nonce, signature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken), main, sub, main, nonce, int256(transferAmount), IExchange.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isNonceUsed(main, nonce), true);
+
+        assertEq(spotEngine.getBalance(address(collateralToken), main), int256(amount - transferAmount));
+        assertEq(spotEngine.getBalance(address(collateralToken), sub), int256(transferAmount));
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), amount);
+
+        assertEq(collateralToken.balanceOf(main), 0);
+        assertEq(collateralToken.balanceOf(sub), 0);
+        assertEq(collateralToken.balanceOf(address(exchange)), amount.convertFromScale(address(collateralToken)));
+    }
+
+    function test_processBatch_transfer_subToMain_succeeds() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        (address sub, uint256 subKey) = makeAddrAndKey("sub");
+        _createSubaccount(main, mainKey, sub, subKey);
+
+        uint256 amount = 300e18;
+        _deposit(sub, address(collateralToken), amount);
+
+        uint64 nonce = 1;
+        uint256 transferAmount = 100e18;
+        bytes memory signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, sub, main, address(collateralToken), transferAmount, nonce))
+        );
+        bytes memory data =
+            abi.encode(IExchange.TransferParams(sub, main, address(collateralToken), transferAmount, nonce, signature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken), sub, main, main, nonce, int256(transferAmount), IExchange.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isNonceUsed(main, nonce), true);
+
+        assertEq(spotEngine.getBalance(address(collateralToken), main), int256(transferAmount));
+        assertEq(spotEngine.getBalance(address(collateralToken), sub), int256(amount - transferAmount));
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), amount);
+
+        assertEq(collateralToken.balanceOf(main), 0);
+        assertEq(collateralToken.balanceOf(sub), 0);
+        assertEq(collateralToken.balanceOf(address(exchange)), amount.convertFromScale(address(collateralToken)));
+    }
+
+    function test_processBatch_transfer_subToSub_succeeds() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        (address sub1, uint256 sub1Key) = makeAddrAndKey("sub1");
+        (address sub2, uint256 sub2Key) = makeAddrAndKey("sub2");
+
+        _createSubaccount(main, mainKey, sub1, sub1Key);
+        _createSubaccount(main, mainKey, sub2, sub2Key);
+
+        uint256 amount = 300e18;
+        _deposit(sub1, address(collateralToken), amount);
+
+        uint64 nonce = 1;
+        uint256 transferAmount = 100e18;
+        bytes memory signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, sub1, sub2, address(collateralToken), transferAmount, nonce))
+        );
+        bytes memory data =
+            abi.encode(IExchange.TransferParams(sub1, sub2, address(collateralToken), transferAmount, nonce, signature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken), sub1, sub2, main, nonce, int256(transferAmount), IExchange.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.isNonceUsed(main, nonce), true);
+
+        assertEq(spotEngine.getBalance(address(collateralToken), sub1), int256(amount - transferAmount));
+        assertEq(spotEngine.getBalance(address(collateralToken), sub2), int256(transferAmount));
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), amount);
+
+        assertEq(collateralToken.balanceOf(sub1), 0);
+        assertEq(collateralToken.balanceOf(sub2), 0);
+        assertEq(collateralToken.balanceOf(address(exchange)), amount.convertFromScale(address(collateralToken)));
+    }
+
+    function test_processBatch_transfer_revertsIfTransferNotAllowed() public {
+        (address main1, uint256 main1Key) = makeAddrAndKey("main1");
+        (address sub1, uint256 sub1Key) = makeAddrAndKey("sub1");
+        _createSubaccount(main1, main1Key, sub1, sub1Key);
+
+        (address main2, uint256 main2Key) = makeAddrAndKey("main2");
+        (address sub2, uint256 sub2Key) = makeAddrAndKey("sub2");
+        _createSubaccount(main2, main2Key, sub2, sub2Key);
+
+        uint64 nonce;
+        uint256 transferAmount;
+        bytes memory signature;
+        bytes memory data;
+        bytes memory operation;
+
+        // main1 -> sub2
+        nonce++;
+        data = abi.encode(
+            IExchange.TransferParams(main1, sub2, address(collateralToken), transferAmount, nonce, signature)
+        );
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main1,
+            sub2,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // sub1 -> main2
+        nonce++;
+        data = abi.encode(
+            IExchange.TransferParams(sub1, main2, address(collateralToken), transferAmount, nonce, signature)
+        );
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            sub1,
+            main2,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // sub1 -> sub2
+        nonce++;
+        data =
+            abi.encode(IExchange.TransferParams(sub1, sub2, address(collateralToken), transferAmount, nonce, signature));
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            sub1,
+            sub2,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
     }
 
     function test_setCanDeposit() public {
@@ -1259,6 +1555,21 @@ contract BalanceExchangeTest is Test {
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
         );
         exchange.setCanDeposit(true);
+    }
+
+    function _createSubaccount(address main, uint256 mainKey, address subaccount, uint256 subKey) private {
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+    }
+
+    function _deposit(address account, address token, uint256 amount) private {
+        vm.prank(address(exchange));
+        clearingService.deposit(account, amount, token);
+        ERC20Simple(token).mint(address(exchange), amount.convertFromScale(token));
     }
 
     function _prepareDeposit(address account, uint128 amount) private {

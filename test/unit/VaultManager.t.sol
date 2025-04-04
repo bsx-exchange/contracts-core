@@ -135,7 +135,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
 
-        vm.expectRevert(abi.encodeWithSelector(Errors.Vault_AlreadyRegistered.selector, vault));
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, vault));
 
         vm.prank(sequencer);
         exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
@@ -234,6 +234,8 @@ contract VaultManagerTest is Test {
 
         uint256 expectedShares = 25 ether;
 
+        assertEq(vaultManager.vaultCount(staker), 0);
+
         vm.expectEmit(address(exchange));
         emit IExchange.StakeVault(
             vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Success
@@ -241,6 +243,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
 
         IVaultManager.StakerData memory stakerData = vaultManager.getStakerData(vault, staker);
@@ -288,6 +291,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
         IVaultManager.StakerData memory stakerData = vaultManager.getStakerData(vault, staker);
         assertEq(stakerData.shares, expectedShares1);
@@ -324,6 +328,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
         stakerData = vaultManager.getStakerData(vault, staker);
         assertEq(stakerData.shares, expectedShares1 + expectedShares2);
@@ -366,6 +371,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(exchange.isStakeVaultNonceUsed(staker, nonce), true);
         stakerData = vaultManager.getStakerData(vault, staker);
         assertEq(stakerData.shares, expectedShares1 + expectedShares2 + expectedShares3);
@@ -455,11 +461,7 @@ contract VaultManagerTest is Test {
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
-        uint256 expectedShares = 0;
-        vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Failure
-        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Vault_Stake_UsedNonce.selector, staker, nonce));
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
     }
@@ -625,6 +627,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(vaultManager.isStakeNonceUsed(staker, nonce), true);
 
         IVaultManager.StakerData memory stakerData = vaultManager.getStakerData(vault, staker);
@@ -687,7 +690,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 123;
         uint256 stakeAmount = 100 ether;
 
-        // stake 100 ether with price 1 ether
+        // 1. stake 100 ether with price 1 ether
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
         bytes memory signature = _signTypedData(stakerPrivKey, structHash);
@@ -707,7 +710,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
-        // unstake 60 ether with price 1 ether => 60 shares
+        // 2. unstake 60 ether with price 1 ether => 60 shares
         uint256 unstakeAmount = 60 ether;
         uint256 expectedShares = 60 ether;
         uint256 expectedFee = 0;
@@ -746,6 +749,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(exchange.isUnstakeVaultNonceUsed(staker, nonce), true);
 
         IVaultManager.StakerData memory stakerData = vaultManager.getStakerData(vault, staker);
@@ -758,6 +762,56 @@ contract VaultManagerTest is Test {
         assertEq(exchange.balanceOf(vault, address(asset)), 40 ether);
         assertEq(exchange.balanceOf(staker, address(asset)), 60 ether);
         assertEq(exchange.balanceOf(feeRecipient, address(asset)), int256(expectedFee));
+
+        // 3. unstake 40 ether with price 1 ether => 40 shares
+        nonce = 456;
+        unstakeAmount = 40 ether;
+        expectedShares = 40 ether;
+        structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
+        signature = _signTypedData(stakerPrivKey, structHash);
+        operation = _encodeDataToOperation(
+            IExchange.OperationType.UnstakeVault,
+            abi.encode(
+                IExchange.UnstakeVaultParams({
+                    vault: vault,
+                    account: staker,
+                    token: address(asset),
+                    amount: unstakeAmount,
+                    nonce: nonce,
+                    signature: signature
+                })
+            )
+        );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.UnstakeVault(
+            vault,
+            staker,
+            nonce,
+            address(asset),
+            unstakeAmount,
+            expectedShares,
+            expectedFee,
+            address(0),
+            IExchange.VaultActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(vaultManager.vaultCount(staker), 0);
+        assertEq(exchange.isUnstakeVaultNonceUsed(staker, nonce), true);
+
+        stakerData = vaultManager.getStakerData(vault, staker);
+        assertEq(stakerData.shares, 0);
+        assertEq(stakerData.avgPrice, 1 ether);
+
+        vaultData = vaultManager.getVaultData(vault);
+        assertEq(vaultData.totalShares, 0);
+
+        assertEq(exchange.balanceOf(vault, address(asset)), 0);
+        assertEq(exchange.balanceOf(staker, address(asset)), int256(stakeAmount));
+        assertEq(exchange.balanceOf(feeRecipient, address(asset)), 0);
     }
 
     function test_unstake_withProfit_success() public {
@@ -829,6 +883,7 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
+        assertEq(vaultManager.vaultCount(staker), 1);
         assertEq(exchange.isUnstakeVaultNonceUsed(staker, nonce), true);
 
         IVaultManager.StakerData memory stakerData = vaultManager.getStakerData(vault, staker);
@@ -933,20 +988,7 @@ contract VaultManagerTest is Test {
         vm.prank(address(exchange));
         vaultManager.unstake(vault, staker, address(asset), unstakeAmount, nonce, signature);
 
-        uint256 expectedShares = 0;
-        uint256 expectedFee = 0;
-        vm.expectEmit(address(exchange));
-        emit IExchange.UnstakeVault(
-            vault,
-            staker,
-            nonce,
-            address(asset),
-            unstakeAmount,
-            expectedShares,
-            expectedFee,
-            address(0),
-            IExchange.VaultActionStatus.Failure
-        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Vault_Unstake_UsedNonce.selector, staker, nonce));
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
     }

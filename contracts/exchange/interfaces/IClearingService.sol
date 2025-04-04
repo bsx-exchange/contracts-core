@@ -27,6 +27,13 @@ interface IClearingService {
     /// @param token Token address
     function withdraw(address account, uint256 amount, address token) external;
 
+    /// @notice Transfer token between 2 accounts
+    /// @param from Sender address
+    /// @param to Recipient address
+    /// @param token Token address
+    /// @param amount Amount of token
+    function transfer(address from, address to, int256 amount, address token) external;
+
     /// @notice Deposits token to insurance fund
     /// @param token Token address
     /// @param amount Amount of token (in 18 decimals)

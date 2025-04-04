@@ -103,11 +103,20 @@ library Errors {
     /// @param maxRate Maximum rebate rate
     error Exchange_ExceededMaxRebateRate(uint16 rate, uint16 maxRate);
 
+    /// @notice Thrown when the account nonce has already been used
+    error Exchange_NonceUsed(address account, uint256 nonce);
+
     /// @notice Thrown when adding signing wallet with used nonce
     error Exchange_AddSigningWallet_UsedNonce(address account, uint64 nonce);
 
     /// @notice Thrown when withdrawing with used nonce
     error Exchange_Withdraw_NonceUsed(address account, uint64 nonce);
+
+    /// @notice Throw when account doesn't have enough balance to internal transfer
+    error Exchange_Transfer_InsufficientBalance(address account, address token, int256 balance, uint256 amount);
+
+    /// @notice Throw when transferring between from and to doesn't permit
+    error Exchange_Transfer_NotAllowed(address from, address to);
 
     /// @notice Thrown when transferring to BSX1000 with used nonce
     error Exchange_TransferToBSX1000_NonceUsed(address account, uint256 nonce);
@@ -126,6 +135,9 @@ library Errors {
 
     /// @notice Thrown when asset is not whitelisted
     error Exchange_Liquidation_InvalidAsset(address asset);
+
+    /// @notice Thrown when account is not active
+    error Exchange_AccountNotActive(address account);
 
     /// @notice Thrown when empty commands submitted to Universal Router
     error Exchange_UniversalRouter_EmptyCommand();
@@ -163,6 +175,33 @@ library Errors {
 
     /// @notice Thrown when swap amount exceeds the maximum amount
     error Exchange_Swap_AmountOutTooLittle(uint256 amountOutX18, uint256 minAmountOutX18);
+
+    /// @notice Thrown when the action does not support subaccount
+    error Exchange_Subaccount();
+
+    /// @notice Thrown when subaccount is deleted
+    error Exchange_Subaccount_Deleted(address subaccount);
+
+    /// @notice Thrown when account type is invalid
+    error Exchange_InvalidAccountType(address account);
+
+    /// @notice ThroThrown when attempting to register a main account as a subaccount
+    error Exchange_Subaccount_IsMainAccount(address subaccount);
+
+    /// @notice Thrown when subaccount is not active
+    error Exchange_Subaccount_NotActive(address subaccount);
+
+    /// @notice Thrown when submitted main account does not match the current main account
+    error Exchange_Subaccount_MainAccountMismatch(address submitted, address expected);
+
+    /// @notice Thrown when creating a subaccount with a nonzero token balance
+    error Exchange_Subaccount_NonzeroBalance(address subaccount, address token);
+
+    /// @notice Thrown when subaccount has insufficient balance
+    error Exchange_Subaccount_JoinedVault(address joinedVault);
+
+    /// @notice Thrown when subaccount has open position in perpetual market
+    error Exchange_Subaccount_HasOpenPosition(address subaccount);
 
     /// @notice Thrown when interacting with vault address
     error Exchange_VaultAddress();

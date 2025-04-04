@@ -104,6 +104,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
     /// @inheritdoc IBSX1000x
     function deposit(address account, uint256 amount) public {
+        _assertMainAccount(account);
+
         (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
         if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
 
@@ -117,6 +119,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
     /// @inheritdoc IBSX1000x
     function depositRaw(address account, address token, uint256 rawAmount) public {
+        _assertMainAccount(account);
+
         if (token != address(collateralToken)) {
             revert Errors.Exchange_NotCollateralToken();
         }
@@ -140,6 +144,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         bytes32 nonce,
         bytes calldata signature
     ) external {
+        _assertMainAccount(account);
+
         (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
         if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
 
@@ -245,6 +251,8 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         public
         onlyRole(access.BSX1000_OPERATOR_ROLE())
     {
+        _assertMainAccount(order.account);
+
         bytes32 orderHash = _hashTypedDataV4(
             keccak256(
                 abi.encode(
@@ -530,6 +538,12 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     /// @inheritdoc IBSX1000x
     function getIsolatedProducts() external view returns (uint256[] memory) {
         return _isolatedFunds.keys();
+    }
+
+    function _assertMainAccount(address account) internal view {
+        if (access.getExchange().getAccountType(account) != IExchange.AccountType.Main) {
+            revert Errors.Exchange_InvalidAccountType(account);
+        }
     }
 
     function _lockMargin(address account, uint256 nonce, uint256 margin, uint256 credit) internal {

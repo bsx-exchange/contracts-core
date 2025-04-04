@@ -6,7 +6,6 @@ import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/crypt
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import {IBSX1000x} from "../1000x/interfaces/IBSX1000x.sol";
@@ -17,12 +16,15 @@ import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IVaultManager} from "./interfaces/IVaultManager.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
+
+import {AccountLogic} from "./lib/logic/AccountLogic.sol";
+import {AdminLogic} from "./lib/logic/AdminLogic.sol";
 import {BalanceLogic} from "./lib/logic/BalanceLogic.sol";
-import {GenericLogic} from "./lib/logic/GenericLogic.sol";
 import {LiquidationLogic} from "./lib/logic/LiquidationLogic.sol";
 import {OrderLogic} from "./lib/logic/OrderLogic.sol";
+import {SignerLogic} from "./lib/logic/SignerLogic.sol";
 import {SwapLogic} from "./lib/logic/SwapLogic.sol";
-import {BSX_TOKEN, NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR} from "./share/Constants.sol";
+import {BSX_TOKEN, NATIVE_ETH} from "./share/Constants.sol";
 
 /// @title Exchange contract
 /// @notice This contract is entry point of the exchange
@@ -34,9 +36,6 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     using MathHelper for uint256;
     using MathHelper for int256;
     using MathHelper for int128;
-
-    bytes32 public constant REGISTER_TYPEHASH = keccak256("Register(address key,string message,uint64 nonce)");
-    bytes32 public constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
 
     function _checkRole(bytes32 role, address account) internal view {
         if (!access.hasRole(role, account)) {
@@ -78,8 +77,15 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     modifier notVault(address account) {
-        if (access.getVaultManager().isRegistered(account)) {
+        if (_accounts[account].accountType == AccountType.Vault) {
             revert Errors.Exchange_VaultAddress();
+        }
+        _;
+    }
+
+    modifier notSubaccount(address account) {
+        if (_accounts[account].accountType == AccountType.Subaccount) {
+            revert Errors.Exchange_Subaccount();
         }
         _;
     }
@@ -109,6 +115,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         external
         onlyRole(access.GENERAL_ROLE())
     {
+        if (_accounts[vault].accountType != AccountType.Main) {
+            revert Errors.Exchange_InvalidAccountType(vault);
+        }
+        _accounts[vault].accountType = AccountType.Vault;
         access.getVaultManager().registerVault(vault, feeRecipient, profitShareBps, signature);
 
         emit RegisterVault(vault, feeRecipient, profitShareBps);
@@ -132,6 +142,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         enabledDeposit
         supportedToken(token)
         notVault(recipient)
+        notSubaccount(recipient)
     {
         BalanceLogic.deposit(BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount);
     }
@@ -145,7 +156,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external enabledDeposit supportedToken(token) notVault(depositor) {
+    ) public enabledDeposit supportedToken(token) notVault(depositor) notSubaccount(depositor) {
         BalanceLogic.depositWithAuthorization(
             BalanceLogic.BalanceEngine(clearingService, spotEngine),
             depositor,
@@ -184,41 +195,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @inheritdoc IExchange
     function claimTradingFees() external onlyRole(access.GENERAL_ROLE()) {
-        IOrderBook.FeeCollection memory tradingFees = book.claimTradingFees();
-
-        address usdc = book.getCollateralToken();
-        uint256 usdcAmount = tradingFees.inUSDC.safeUInt256();
-        IERC20(usdc).safeTransfer(feeRecipientAddress, usdcAmount.convertFromScale(usdc));
-
-        uint256 bsxAmount = tradingFees.inBSX.safeUInt256();
-        IERC20(BSX_TOKEN).safeTransfer(feeRecipientAddress, bsxAmount.convertFromScale(BSX_TOKEN));
-
-        emit ClaimTradingFees(msg.sender, tradingFees);
+        return AdminLogic.claimTradingFees(book, msg.sender, feeRecipientAddress);
     }
 
     /// @inheritdoc IExchange
     function claimSequencerFees() external onlyRole(access.GENERAL_ROLE()) {
-        address underlyingAsset = book.getCollateralToken();
-        IOrderBook.FeeCollection memory sequencerFees = book.claimSequencerFees();
-
-        for (uint256 i = 0; i < supportedTokens.length(); ++i) {
-            address token = supportedTokens.at(i);
-            if (token == NATIVE_ETH) {
-                continue;
-            }
-
-            uint256 totalFees = _collectedFee[token];
-            if (token == underlyingAsset) {
-                totalFees += sequencerFees.inUSDC.safeUInt256();
-            } else if (token == BSX_TOKEN) {
-                totalFees += sequencerFees.inBSX.safeUInt256();
-            }
-            _collectedFee[token] = 0;
-
-            uint256 amountToTransfer = totalFees.convertFromScale(token);
-            IERC20(token).safeTransfer(feeRecipientAddress, amountToTransfer);
-            emit ClaimSequencerFees(msg.sender, token, totalFees);
-        }
+        return AdminLogic.claimSequencerFees(_collectedFee, this, book, msg.sender, feeRecipientAddress);
     }
 
     /// @inheritdoc IExchange
@@ -239,7 +221,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         external
         onlyRole(access.COLLATERAL_OPERATOR_ROLE())
     {
-        LiquidationLogic.liquidateCollateralBatch(isLiquidationNonceUsed, this, params);
+        return LiquidationLogic.liquidateCollateralBatch(isLiquidationNonceUsed, this, params);
     }
 
     /// @inheritdoc ILiquidation
@@ -301,7 +283,23 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         bytes memory walletSignature,
         bytes memory signerSignature
     ) external {
-        _addSigningWallet(account, signer, message, nonce, walletSignature, signerSignature);
+        _addSigningWallet(AddSigningWallet(account, signer, message, nonce, walletSignature, signerSignature));
+    }
+
+    /// @inheritdoc IExchange
+    function createSubaccount(address main, address subaccount, bytes memory mainSignature, bytes memory subSignature)
+        external
+        onlyRole(access.GENERAL_ROLE())
+    {
+        return AccountLogic.createSubaccount(_accounts, access, this, main, subaccount, mainSignature, subSignature);
+    }
+
+    /// @inheritdoc IExchange
+    function coverLoss(address account, address payer, address token) external override returns (uint256 coverAmount) {
+        if (msg.sender != address(access.getVaultManager())) {
+            revert Errors.Unauthorized();
+        }
+        return BalanceLogic.coverLoss(BalanceLogic.BalanceEngine(clearingService, spotEngine), account, payer, token);
     }
 
     /// @inheritdoc IExchange
@@ -354,6 +352,11 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
+    function accounts(address account) external view returns (Account memory) {
+        return _accounts[account];
+    }
+
+    /// @inheritdoc IExchange
     function balanceOf(address user, address token) public view returns (int256) {
         int256 balance = spotEngine.getBalance(token, user);
         return balance;
@@ -366,6 +369,16 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         for (uint256 index = 0; index < length; index++) {
             tokenList[index] = supportedTokens.at(index);
         }
+    }
+
+    /// @inheritdoc IExchange
+    function getAccountType(address account) external view returns (AccountType) {
+        return _accounts[account].accountType;
+    }
+
+    /// @inheritdoc IExchange
+    function getSubaccounts(address main) external view returns (address[] memory) {
+        return _accounts[main].subaccounts;
     }
 
     /// @inheritdoc IExchange
@@ -391,6 +404,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @inheritdoc IExchange
     function isUnstakeVaultNonceUsed(address account, uint256 nonce) public view returns (bool) {
         return access.getVaultManager().isUnstakeNonceUsed(account, nonce);
+    }
+
+    function isNonceUsed(address account, uint256 nonce) public view override returns (bool) {
+        return _isNonceUsed[account][nonce];
     }
 
     /// @dev Handles a operation. Will revert if operation type is invalid.
@@ -427,8 +444,11 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             (address account, uint256 amount) = abi.decode(data[5:], (address, uint256));
             clearingService.coverLossWithInsuranceFund(account, amount);
         } else if (operationType == OperationType.AddSigningWallet) {
-            AddSigningWallet memory txs = abi.decode(data[5:], (AddSigningWallet));
-            _addSigningWallet(txs.sender, txs.signer, txs.message, txs.nonce, txs.walletSignature, txs.signerSignature);
+            AddSigningWallet memory params = abi.decode(data[5:], (AddSigningWallet));
+            _addSigningWallet(params);
+        } else if (operationType == OperationType.RegisterSubaccountSigner) {
+            RegisterSubaccountSignerParams memory params = abi.decode(data[5:], (RegisterSubaccountSignerParams));
+            _registerSubaccountSigner(params);
         } else if (operationType == OperationType.TransferToBSX1000) {
             TransferToBSX1000Params memory transferData = abi.decode(data[5:], (TransferToBSX1000Params));
             _transferToBSX1000(transferData);
@@ -441,6 +461,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         } else if (operationType == OperationType.UnstakeVault) {
             UnstakeVaultParams memory unstakeVaultData = abi.decode(data[5:], (UnstakeVaultParams));
             _unstakeVault(unstakeVaultData);
+        } else if (operationType == OperationType.Transfer) {
+            TransferParams memory params = abi.decode(data[5:], (TransferParams));
+            _transfer(params);
+        } else if (operationType == OperationType.DeleteSubaccount) {
+            DeleteSubaccountParams memory params = abi.decode(data[5:], (DeleteSubaccountParams));
+            _deleteSubaccount(params);
         } else {
             revert Errors.Exchange_InvalidOperationType();
         }
@@ -448,34 +474,84 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @dev Handles matching normal orders
     function _matchOrders(bytes calldata data) internal {
-        OrderLogic.matchOrders(this, OrderLogic.OrderEngine(book, spotEngine), data);
+        OrderLogic.matchOrders(_accounts, this, OrderLogic.OrderEngine(book, spotEngine), data);
     }
 
     /// @dev Handles matching liquidation orders
     function _matchLiquidationOrders(bytes calldata data) internal {
-        OrderLogic.matchLiquidationOrders(this, OrderLogic.OrderEngine(book, spotEngine), data);
+        OrderLogic.matchLiquidationOrders(_accounts, this, OrderLogic.OrderEngine(book, spotEngine), data);
     }
 
     /// @dev Handles a withdraw
-    function _withdraw(Withdraw memory data) internal enabledWithdraw notVault(data.sender) {
-        BalanceLogic.withdraw(
-            isWithdrawNonceUsed, _collectedFee, this, BalanceLogic.BalanceEngine(clearingService, spotEngine), data
-        );
+    function _withdraw(Withdraw memory data) internal enabledWithdraw {
+        if (isWithdrawNonceUsed[data.sender][data.nonce]) {
+            revert Errors.Exchange_Withdraw_NonceUsed(data.sender, data.nonce);
+        }
+        isWithdrawNonceUsed[data.sender][data.nonce] = true;
+
+        try BalanceLogic.withdraw(
+            _accounts, _collectedFee, this, BalanceLogic.BalanceEngine(clearingService, spotEngine), data
+        ) {
+            emit WithdrawSucceeded(data.token, data.sender, data.nonce, data.amount, 0, data.withdrawalSequencerFee);
+        } catch {
+            emit WithdrawFailed(data.sender, data.nonce, 0, 0);
+        }
     }
 
-    function _transferToBSX1000(TransferToBSX1000Params memory data) internal notVault(data.account) {
-        if (isTransferToBSX1000NonceUsed[data.account][data.nonce]) {
-            revert Errors.Exchange_TransferToBSX1000_NonceUsed(data.account, data.nonce);
+    /// @dev Handles a transfer between 2 accounts in the exchange
+    function _transfer(TransferParams memory params) internal {
+        address signer = _accounts[params.from].accountType == IExchange.AccountType.Subaccount
+            ? _accounts[params.from].main
+            : params.from;
+        if (_isNonceUsed[signer][params.nonce]) {
+            revert Errors.Exchange_NonceUsed(signer, params.nonce);
         }
-        isTransferToBSX1000NonceUsed[data.account][data.nonce] = true;
+        _isNonceUsed[signer][params.nonce] = true;
 
-        try this.innerTransferToBSX1000(data) returns (uint256 balance) {
+        try BalanceLogic.transfer(
+            this, _accounts, BalanceLogic.BalanceEngine(clearingService, spotEngine), signer, params
+        ) {
+            emit Transfer(
+                params.token,
+                params.from,
+                params.to,
+                signer,
+                params.nonce,
+                params.amount.safeInt256(),
+                ActionStatus.Success
+            );
+        } catch {
+            emit Transfer(
+                params.token,
+                params.from,
+                params.to,
+                address(0),
+                params.nonce,
+                params.amount.safeInt256(),
+                ActionStatus.Failure
+            );
+        }
+    }
+
+    function _transferToBSX1000(TransferToBSX1000Params memory params) internal {
+        if (isTransferToBSX1000NonceUsed[params.account][params.nonce]) {
+            revert Errors.Exchange_TransferToBSX1000_NonceUsed(params.account, params.nonce);
+        }
+        isTransferToBSX1000NonceUsed[params.account][params.nonce] = true;
+
+        try BalanceLogic.transferToBSX1000(
+            _accounts,
+            this,
+            IBSX1000x(access.getBsx1000()),
+            BalanceLogic.BalanceEngine(clearingService, spotEngine),
+            params
+        ) returns (uint256 balance) {
             emit TransferToBSX1000(
-                data.token, data.account, data.nonce, data.amount, balance, TransferToBSX1000Status.Success
+                params.token, params.account, params.nonce, params.amount, balance, TransferToBSX1000Status.Success
             );
         } catch {
             emit TransferToBSX1000(
-                data.token, data.account, data.nonce, data.amount, 0, TransferToBSX1000Status.Failure
+                params.token, params.account, params.nonce, params.amount, 0, TransferToBSX1000Status.Failure
             );
         }
     }
@@ -483,6 +559,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @dev Call to vault manager to stake
     function _stakeVault(StakeVaultParams memory data) internal {
         IVaultManager vaultManager = access.getVaultManager();
+        if (vaultManager.isStakeNonceUsed(data.account, data.nonce)) {
+            revert Errors.Vault_Stake_UsedNonce(data.account, data.nonce);
+        }
+
         try vaultManager.stake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature) returns (
             uint256 shares
         ) {
@@ -497,6 +577,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @dev Call to vault manager to unstake
     function _unstakeVault(UnstakeVaultParams memory data) internal {
         IVaultManager vaultManager = access.getVaultManager();
+        if (vaultManager.isUnstakeNonceUsed(data.account, data.nonce)) {
+            revert Errors.Vault_Unstake_UsedNonce(data.account, data.nonce);
+        }
+
         try vaultManager.unstake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature)
         returns (uint256 shares, uint256 fee, address feeRecipient) {
             emit UnstakeVault(
@@ -525,73 +609,23 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         }
     }
 
-    function innerTransferToBSX1000(TransferToBSX1000Params memory params)
-        external
-        internalCall
-        returns (uint256 balance)
-    {
-        return BalanceLogic.transferToBSX1000(
-            this, IBSX1000x(access.getBsx1000()), BalanceLogic.BalanceEngine(clearingService, spotEngine), params
-        );
-    }
-
-    function coverLoss(address account, address payer, address asset) external override returns (uint256 coverAmount) {
-        if (msg.sender != address(access.getVaultManager())) {
-            revert Errors.Unauthorized();
+    function _deleteSubaccount(DeleteSubaccountParams memory params) internal {
+        try AccountLogic.deleteSubaccount(_accounts, access, this, params) {
+            emit DeleteSubaccount(params.main, params.subaccount, ActionStatus.Success);
+        } catch {
+            emit DeleteSubaccount(params.main, params.subaccount, ActionStatus.Failure);
         }
-
-        int256 loss = balanceOf(account, asset);
-        if (loss >= 0) {
-            revert Errors.Exchange_AccountNoLoss(account, asset);
-        }
-        coverAmount = SignedMath.abs(loss);
-        int256 payerBalance = balanceOf(payer, asset);
-        if (payerBalance < coverAmount.safeInt256()) {
-            revert Errors.Exchange_AccountInsufficientBalance(payer, asset, payerBalance, coverAmount);
-        }
-
-        clearingService.withdraw(payer, coverAmount, asset);
-        clearingService.deposit(account, coverAmount, asset);
-
-        emit CoverLoss(account, payer, asset, coverAmount);
     }
 
     /// @dev Validates and authorizes a signer to sign on behalf of a sender.
     /// Supports adding a signing wallet for both EOA and smart contract.
     /// Smart contract signature validation follows ERC1271 standards.
-    /// @param sender Sender address
-    /// @param signer Signer address
-    /// @param authorizedMsg Message is signed by the sender
-    /// @param nonce Unique nonce for each signing wallet, check by `usedNonces`
-    /// @param senderSignature Signature of the sender, can be EOA or contract wallet
-    /// @param signerSignature Signature of the signer, must be EOA
-    function _addSigningWallet(
-        address sender,
-        address signer,
-        string memory authorizedMsg,
-        uint64 nonce,
-        bytes memory senderSignature,
-        bytes memory signerSignature
-    ) internal {
-        if (isRegisterSignerNonceUsed[sender][nonce]) {
-            revert Errors.Exchange_AddSigningWallet_UsedNonce(sender, nonce);
-        }
+    function _addSigningWallet(AddSigningWallet memory params) internal {
+        return SignerLogic.registerSigner(isRegisterSignerNonceUsed, _signingWallets, this, params);
+    }
 
-        // verify signature of sender
-        bytes32 registerHash = _hashTypedDataV4(
-            keccak256(abi.encode(REGISTER_TYPEHASH, signer, keccak256(abi.encodePacked(authorizedMsg)), nonce))
-        );
-        if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(sender, registerHash, senderSignature)) {
-            revert Errors.Exchange_InvalidSignature(sender);
-        }
-
-        // verify signature of authorized signer
-        bytes32 signKeyHash = _hashTypedDataV4(keccak256(abi.encode(SIGN_KEY_TYPEHASH, sender)));
-        GenericLogic.verifySignature(signer, signKeyHash, signerSignature);
-
-        _signingWallets[sender][signer] = true;
-        isRegisterSignerNonceUsed[sender][nonce] = true;
-
-        emit RegisterSigner(sender, signer, nonce);
+    /// @dev Validates and authorizes a signer to place order on behalf of a subaccount.
+    function _registerSubaccountSigner(RegisterSubaccountSignerParams memory params) internal {
+        return SignerLogic.registerSubaccountSigner(_accounts, isRegisterSignerNonceUsed, _signingWallets, this, params);
     }
 }
