@@ -112,7 +112,11 @@ library AccountLogic {
         address[] memory supportedTokens = exchange.getSupportedTokenList();
         for (uint256 i = 0; i < supportedTokens.length; i++) {
             address token = supportedTokens[i];
+            address yieldAsset = clearingService.yieldAssets(token);
             _transferSubToMain(clearingService, spotEngine, token, main, subaccount);
+            if (yieldAsset != address(0)) {
+                _transferSubToMain(clearingService, spotEngine, yieldAsset, main, subaccount);
+            }
         }
 
         // Check if the subaccount has no open position

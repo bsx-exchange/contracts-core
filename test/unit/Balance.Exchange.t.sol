@@ -8,6 +8,8 @@ import {Helper} from "../Helper.sol";
 import {ERC1271} from "../mock/ERC1271.sol";
 import {ERC20MissingReturn} from "../mock/ERC20MissingReturn.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
+
+import {MockERC4626} from "../mock/MockERC4626.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 import {WETH9Mock} from "../mock/WETH9.sol";
 
@@ -471,6 +473,109 @@ contract BalanceExchangeTest is Test {
 
         vm.expectRevert(Errors.Exchange_DisabledDeposit.selector);
         exchange.depositWithAuthorization(address(collateralToken), makeAddr("account"), 100, 0, 0, 0, "");
+    }
+
+    function test_depositAndEarn_succeeds() public {
+        address yieldAsset = _setupYieldAsset();
+        // 1 share = 2 tokens
+        collateralToken.mint(yieldAsset, 1);
+
+        address user = makeAddr("user");
+        uint256 amount = 100e18;
+        uint256 mintShares = 50e18;
+
+        vm.startPrank(user);
+        _prepareDeposit(user, uint128(amount));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(address(collateralToken), user, amount, 0);
+
+        vm.expectEmit(address(clearingService));
+        emit IClearingService.SwapAssets(
+            user,
+            0,
+            address(collateralToken),
+            amount,
+            yieldAsset,
+            mintShares,
+            address(0),
+            0,
+            IClearingService.SwapType.EarnYieldAsset,
+            IClearingService.ActionStatus.Success
+        );
+
+        exchange.depositAndEarn(address(collateralToken), uint128(amount));
+
+        assertEq(spotEngine.getBalance(address(collateralToken), user), 0);
+        assertEq(spotEngine.getBalance(yieldAsset, user), int256(mintShares));
+
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), 0);
+        assertEq(spotEngine.getTotalBalance(yieldAsset), mintShares);
+
+        assertEq(ERC20Simple(yieldAsset).balanceOf(address(clearingService)), mintShares);
+        assertEq(collateralToken.balanceOf(address(exchange)), 0);
+    }
+
+    function test_depositAndEarnWithAuthorization_succeeds() public {
+        address yieldAsset = _setupYieldAsset();
+        // 1 share = 2 tokens
+        collateralToken.mint(yieldAsset, 1);
+
+        address user = makeAddr("user");
+        uint256 amount = 100e18;
+        uint256 mintShares = 50e18;
+
+        collateralToken.mint(address(exchange), uint128(amount).convertFrom18D(collateralToken.decimals()));
+
+        uint8 tokenDecimals = collateralToken.decimals();
+        uint256 mockValidTime = block.timestamp;
+        bytes32 mockNonce = keccak256(abi.encode(user, mockValidTime));
+        bytes memory mockSignature = abi.encode(user, mockValidTime, mockNonce);
+        vm.mockCall(
+            address(collateralToken),
+            abi.encodeWithSelector(
+                IERC3009Minimal.receiveWithAuthorization.selector,
+                user,
+                address(exchange),
+                uint128(amount).convertFrom18D(tokenDecimals),
+                mockValidTime,
+                mockValidTime,
+                mockNonce,
+                mockSignature
+            ),
+            abi.encode()
+        );
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(address(collateralToken), user, amount, 0);
+
+        vm.expectEmit(address(clearingService));
+        emit IClearingService.SwapAssets(
+            user,
+            0,
+            address(collateralToken),
+            amount,
+            yieldAsset,
+            mintShares,
+            address(0),
+            0,
+            IClearingService.SwapType.EarnYieldAsset,
+            IClearingService.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.depositAndEarnWithAuthorization(
+            address(collateralToken), user, uint128(amount), mockValidTime, mockValidTime, mockNonce, mockSignature
+        );
+
+        assertEq(spotEngine.getBalance(address(collateralToken), user), 0);
+        assertEq(spotEngine.getBalance(yieldAsset, user), int256(mintShares));
+
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), 0);
+        assertEq(spotEngine.getTotalBalance(yieldAsset), mintShares);
+
+        assertEq(ERC20Simple(yieldAsset).balanceOf(address(clearingService)), mintShares);
+        assertEq(collateralToken.balanceOf(address(exchange)), 0);
     }
 
     function test_processBatch_transferToBSX1000_withEOA() public {
@@ -1581,6 +1686,13 @@ contract BalanceExchangeTest is Test {
         uint256 rawAmount = amount.convertFrom18D(decimals);
         ERC20Simple(token).mint(account, rawAmount);
         ERC20Simple(token).approve(address(exchange), rawAmount);
+    }
+
+    function _setupYieldAsset() private returns (address yieldAsset) {
+        yieldAsset = address(new MockERC4626(collateralToken));
+
+        vm.prank(sequencer);
+        clearingService.addYieldAsset(address(collateralToken), yieldAsset);
     }
 
     function _encodeDataToOperation(IExchange.OperationType operationType, bytes memory data)

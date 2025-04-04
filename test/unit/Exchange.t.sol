@@ -1084,6 +1084,34 @@ contract ExchangeTest is Test {
         exchange.setCanWithdraw(true);
     }
 
+    function test_requestToken_succeeds() public {
+        uint256 amount = 1e18;
+        ERC20Simple(collateralToken).mint(address(exchange), amount);
+
+        uint256 exchangeBalanceBefore = ERC20Simple(collateralToken).balanceOf(address(exchange));
+        uint256 clearingServiceBalanceBefore = ERC20Simple(collateralToken).balanceOf(address(clearingService));
+
+        vm.expectEmit(address(collateralToken));
+        emit IERC20.Transfer(address(exchange), address(clearingService), amount);
+
+        vm.prank(address(clearingService));
+        exchange.requestToken(address(collateralToken), amount);
+
+        assertEq(ERC20Simple(collateralToken).balanceOf(address(exchange)), exchangeBalanceBefore - amount);
+        assertEq(
+            ERC20Simple(collateralToken).balanceOf(address(clearingService)), clearingServiceBalanceBefore + amount
+        );
+    }
+
+    function test_requestToken_revertsIfUnauthorized() public {
+        address malicious = makeAddr("malicious");
+
+        vm.expectRevert(Errors.Unauthorized.selector);
+
+        vm.prank(malicious);
+        exchange.requestToken(address(collateralToken), 1e8);
+    }
+
     function _encodeDataToOperation(IExchange.OperationType operationType, bytes memory data)
         private
         view

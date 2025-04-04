@@ -286,6 +286,8 @@ contract OrderBook is IOrderBook, Initializable {
         }
 
         spotEngine.updateBalance(_account, _collateralToken, amountToSettle);
+        clearingService.liquidateYieldAssetIfNecessary(_account, _collateralToken);
+
         newQuote = newQuote - amountToSettle;
         return (newQuote, newSize);
     }

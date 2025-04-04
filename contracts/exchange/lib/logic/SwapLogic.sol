@@ -11,6 +11,7 @@ import {IClearingService} from "../../interfaces/IClearingService.sol";
 import {ISpot} from "../../interfaces/ISpot.sol";
 import {ISwap} from "../../interfaces/ISwap.sol";
 import {IUniversalRouter} from "../../interfaces/external/IUniversalRouter.sol";
+import {Commands} from "../../lib/Commands.sol";
 import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
 import {Percentage} from "../../lib/Percentage.sol";
@@ -34,36 +35,45 @@ library SwapLogic {
     /// Only reverts if nonce is used, otherwise emits the `SwapCollateral()` event with status
     /// @param exchange The exchange instance
     /// @param params The array of swap params for each swap
-    function swapCollateralBatch(Exchange exchange, ISwap.SwapParams[] calldata params) external {
+    function swapCollateralBatch(
+        mapping(address => mapping(uint256 => bool)) storage isSwapNonceUsed,
+        Exchange exchange,
+        ISwap.SwapParams[] calldata params
+    ) external {
         for (uint256 i = 0; i < params.length; i++) {
             if (exchange.isSwapNonceUsed(params[i].account, params[i].nonce)) {
                 revert Errors.Exchange_Swap_NonceUsed(params[i].account, params[i].nonce);
             }
+            isSwapNonceUsed[params[i].account][params[i].nonce] = true;
 
-            try exchange.innerSwapWithPermit(params[i]) returns (uint256 amountOutX18) {
-                emit ISwap.SwapCollateral(
-                    params[i].account,
-                    params[i].nonce,
-                    params[i].assetIn,
-                    params[i].amountIn,
-                    params[i].assetOut,
-                    amountOutX18,
-                    params[i].assetIn,
-                    params[i].feeAmount,
-                    ISwap.SwapCollateralStatus.Success
-                );
-            } catch {
-                emit ISwap.SwapCollateral(
-                    params[i].account,
-                    params[i].nonce,
-                    params[i].assetIn,
-                    params[i].amountIn,
-                    params[i].assetOut,
-                    0,
-                    params[i].assetIn,
-                    0,
-                    ISwap.SwapCollateralStatus.Failure
-                );
+            if (params[i].commands.length == 1 && params[i].commands[0] == Commands.MORPHO_PULL_ASSET) {
+                exchange.clearingService().swapYieldAssetPermit(params[i]);
+            } else {
+                try exchange.innerSwapWithPermit(params[i]) returns (uint256 amountOutX18) {
+                    emit ISwap.SwapCollateral(
+                        params[i].account,
+                        params[i].nonce,
+                        params[i].assetIn,
+                        params[i].amountIn,
+                        params[i].assetOut,
+                        amountOutX18,
+                        params[i].assetIn,
+                        params[i].feeAmount,
+                        ISwap.SwapCollateralStatus.Success
+                    );
+                } catch {
+                    emit ISwap.SwapCollateral(
+                        params[i].account,
+                        params[i].nonce,
+                        params[i].assetIn,
+                        params[i].amountIn,
+                        params[i].assetOut,
+                        0,
+                        params[i].assetIn,
+                        0,
+                        ISwap.SwapCollateralStatus.Failure
+                    );
+                }
             }
         }
     }
@@ -80,7 +90,6 @@ library SwapLogic {
     /// @param params The swap parameters
     /// @return amountOutX18 The scaled amount out of the swap (in 18 decimals)
     function executeSwap(
-        mapping(address => mapping(uint256 => bool)) storage isSwapNonceUsed,
         mapping(address token => uint256 collectedFee) storage collectedFees,
         Exchange exchange,
         SwapEngines calldata engines,
@@ -103,7 +112,6 @@ library SwapLogic {
         if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(params.account, swapCollateralHash, params.signature)) {
             revert Errors.Exchange_InvalidSignature(params.account);
         }
-        isSwapNonceUsed[params.account][params.nonce] = true;
 
         // check asset
         if (!exchange.isSupportedToken(params.assetIn) || !exchange.isSupportedToken(params.assetOut)) {

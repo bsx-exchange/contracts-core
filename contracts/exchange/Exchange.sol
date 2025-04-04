@@ -170,6 +170,26 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
+    function depositAndEarn(address token, uint128 amount) external {
+        deposit(msg.sender, token, amount);
+        clearingService.earnYieldAsset(msg.sender, token, amount);
+    }
+
+    /// @inheritdoc IExchange
+    function depositAndEarnWithAuthorization(
+        address token,
+        address depositor,
+        uint128 amount,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        bytes calldata signature
+    ) external onlyRole(access.GENERAL_ROLE()) {
+        depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature);
+        clearingService.earnYieldAsset(depositor, token, amount);
+    }
+
+    /// @inheritdoc IExchange
     function depositInsuranceFund(address token, uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
         (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
@@ -244,7 +264,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @inheritdoc ISwap
     function swapCollateralBatch(SwapParams[] calldata params) external onlyRole(access.COLLATERAL_OPERATOR_ROLE()) {
-        SwapLogic.swapCollateralBatch(this, params);
+        SwapLogic.swapCollateralBatch(isSwapNonceUsed, this, params);
     }
 
     /// @inheritdoc ISwap
@@ -255,7 +275,6 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         returns (uint256 amountOutX18)
     {
         return SwapLogic.executeSwap(
-            isSwapNonceUsed,
             _collectedFee,
             this,
             SwapLogic.SwapEngines({
@@ -265,6 +284,14 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             }),
             params
         );
+    }
+
+    /// @inheritdoc IExchange
+    function requestToken(address token, uint256 amount) external {
+        if (msg.sender != address(clearingService)) {
+            revert Errors.Unauthorized();
+        }
+        IERC20(token).safeTransfer(address(clearingService), amount);
     }
 
     /// @inheritdoc IExchange

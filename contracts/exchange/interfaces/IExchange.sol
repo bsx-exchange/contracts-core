@@ -332,6 +332,12 @@ interface IExchange is ILiquidation, ISwap {
     function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes calldata signature)
         external;
 
+    /// @notice Requests token transfer from the exchange
+    /// @dev Emits a {RequestToken} event
+    /// @param token Token address
+    /// @param amount Amount of token (in token decimals)
+    function requestToken(address token, uint256 amount) external;
+
     /// @notice Deposits token with scaled amount to the exchange
     /// @dev Emits a {Deposit} event
     /// @param token Token address
@@ -369,6 +375,21 @@ interface IExchange is ILiquidation, ISwap {
         uint256 validBefore,
         bytes32 nonce,
         bytes memory signature
+    ) external;
+
+    /// @notice Deposits tokens into the exchange and then earns yield by depositing them into a vault
+    function depositAndEarn(address token, uint128 amount) external;
+
+    /// @notice Deposits tokens into the exchange with authorization and
+    /// then earns yield by depositing them into a vault
+    function depositAndEarnWithAuthorization(
+        address token,
+        address depositor,
+        uint128 amount,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        bytes calldata signature
     ) external;
 
     /// @notice Submit batch of transactions to the exchange, only admin can call this function

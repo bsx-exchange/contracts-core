@@ -219,8 +219,29 @@ library Errors {
     /// @notice Thrown when setting the zero amount
     error ClearingService_ZeroAmount();
 
+    /// @notice Thrown when caller is not this contract
+    error ClearingService_InternalCall();
+
+    /// @notice Thrown when adding already existed vault
+    error ClearingService_YieldAsset_AlreadyExists(address token, address vault);
+
+    /// @notice Thrown when a vault's asset is different from a token
+    error ClearingService_YieldAsset_AssetMismatch(address token, address vault);
+
+    /// @notice Thrown when either asset is not whitelisted
+    error ClearingService_InvalidSwap(address assetIn, address assetOut);
+
+    /// @notice Thrown when the amount out is less than expected
+    error ClearingService_SwapYieldAsset_AmountOutTooLittle();
+
+    /// @notice Thrown when the account has insufficient balance
+    error ClearingService_InsufficientBalance(address account, address token, int256 balance, uint256 amount);
+
     /// @notice Thrown when invalid token
     error ClearingService_InvalidToken(address token);
+
+    /// @notice Thrown when the swap type is invalid
+    error ClearingService_InvalidSwapType();
 
     /// @notice Thrown when insufficient fund in insurance fund
     /// @param amount Requested amount
