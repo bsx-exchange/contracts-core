@@ -27,6 +27,10 @@ library AccountLogic {
         bytes memory mainSignature,
         bytes memory subSignature
     ) external {
+        if (main == subaccount) {
+            revert Errors.Exchange_Subaccount_SameAsMainAccount(subaccount);
+        }
+
         // Check if the main/sub account are main accounts
         if (accounts[main].accountType != IExchange.AccountType.Main) {
             revert Errors.Exchange_InvalidAccountType(main);
@@ -44,7 +48,7 @@ library AccountLogic {
         IBSX1000x bsx1000 = access.getBsx1000();
         IBSX1000x.Balance memory bsx1000Balance = bsx1000.getBalance(subaccount);
         if (bsx1000Balance.available != 0 || bsx1000Balance.locked != 0) {
-            revert Errors.Exchange_Subaccount_NonzeroBalance(subaccount, address(bsx1000.collateralToken()));
+            revert Errors.Exchange_Subaccount_BSX1000_NonzeroBalance(subaccount, address(bsx1000.collateralToken()));
         }
 
         // Check if the subaccount has no balance in BSX perp exchange
@@ -54,7 +58,7 @@ library AccountLogic {
             address token = supportedTokens[i];
             int256 balance = spotEngine.getBalance(token, subaccount);
             if (balance != 0) {
-                revert Errors.Exchange_Subaccount_NonzeroBalance(subaccount, token);
+                revert Errors.Exchange_Subaccount_Exchange_NonzeroBalance(subaccount, token);
             }
         }
 

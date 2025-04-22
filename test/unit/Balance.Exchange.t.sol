@@ -17,6 +17,7 @@ import {BSX1000x, IBSX1000x} from "contracts/1000x/BSX1000x.sol";
 import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
 import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
+import {Perp} from "contracts/exchange/Perp.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
@@ -43,12 +44,14 @@ contract BalanceExchangeTest is Test {
     ClearingService private clearingService;
     OrderBook private orderbook;
     Spot private spotEngine;
+    Perp private perpEngine;
 
     BSX1000x private bsx1000;
 
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant CREATE_SUBACCOUNT_TYPEHASH = keccak256("CreateSubaccount(address main,address subaccount)");
+    bytes32 private constant DELETE_SUBACCOUNT_TYPEHASH = keccak256("DeleteSubaccount(address main,address subaccount)");
     bytes32 public constant TRANSFER_TYPEHASH =
         keccak256("Transfer(address from,address to,address token,uint256 amount,uint256 nonce)");
     bytes32 private constant TRANSFER_TO_BSX1000_TYPEHASH =
@@ -76,6 +79,9 @@ contract BalanceExchangeTest is Test {
         spotEngine = new Spot();
         stdstore.target(address(spotEngine)).sig("access()").checked_write(address(access));
 
+        perpEngine = new Perp();
+        stdstore.target(address(perpEngine)).sig("access()").checked_write(address(access));
+
         orderbook = new OrderBook();
         stdstore.target(address(orderbook)).sig("access()").checked_write(address(access));
         stdstore.target(address(orderbook)).sig("getCollateralToken()").checked_write(address(collateralToken));
@@ -92,12 +98,14 @@ contract BalanceExchangeTest is Test {
         access.setOrderBook(address(orderbook));
         access.setClearingService(address(clearingService));
         access.setSpotEngine(address(spotEngine));
+        access.setPerpEngine(address(perpEngine));
         access.setBsx1000(address(bsx1000));
 
         stdstore.target(address(exchange)).sig("access()").checked_write(address(access));
         stdstore.target(address(exchange)).sig("book()").checked_write(address(orderbook));
         stdstore.target(address(exchange)).sig("clearingService()").checked_write(address(clearingService));
         stdstore.target(address(exchange)).sig("spotEngine()").checked_write(address(spotEngine));
+        stdstore.target(address(exchange)).sig("perpEngine()").checked_write(address(perpEngine));
         exchange.setCanDeposit(true);
         exchange.setCanWithdraw(true);
 
@@ -1561,7 +1569,45 @@ contract BalanceExchangeTest is Test {
         assertEq(collateralToken.balanceOf(address(exchange)), amount.convertFromScale(address(collateralToken)));
     }
 
-    function test_processBatch_transfer_revertsIfTransferNotAllowed() public {
+    function test_processBatch_transfer_revertsIfNonceUsed() public {
+        (address main1, uint256 main1Key) = makeAddrAndKey("main1");
+        address main2 = makeAddr("main2");
+
+        uint256 amount = 300e18;
+        _deposit(main1, address(collateralToken), amount);
+
+        uint64 nonce = 1;
+        uint256 transferAmount1 = 100e18;
+        bytes memory signature = _signTypedDataHash(
+            main1Key,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main1, main2, address(collateralToken), transferAmount1, nonce))
+        );
+        bytes memory data = abi.encode(
+            IExchange.TransferParams(main1, main2, address(collateralToken), transferAmount1, nonce, signature)
+        );
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main1,
+            main2,
+            main1,
+            nonce,
+            int256(transferAmount1),
+            IExchange.ActionStatus.Success
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_NonceUsed.selector, main1, nonce));
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transfer_emitsFailedIfTransferNotAllowed() public {
         (address main1, uint256 main1Key) = makeAddrAndKey("main1");
         (address sub1, uint256 sub1Key) = makeAddrAndKey("sub1");
         _createSubaccount(main1, main1Key, sub1, sub1Key);
@@ -1570,14 +1616,24 @@ contract BalanceExchangeTest is Test {
         (address sub2, uint256 sub2Key) = makeAddrAndKey("sub2");
         _createSubaccount(main2, main2Key, sub2, sub2Key);
 
+        // deposit to all accounts
+        _deposit(main1, address(collateralToken), 300e18);
+        _deposit(sub1, address(collateralToken), 300e18);
+        _deposit(main2, address(collateralToken), 300e18);
+        _deposit(sub2, address(collateralToken), 300e18);
+
         uint64 nonce;
-        uint256 transferAmount;
+        uint256 transferAmount = 100e18;
         bytes memory signature;
         bytes memory data;
         bytes memory operation;
 
         // main1 -> sub2
         nonce++;
+        signature = _signTypedDataHash(
+            main1Key,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main1, sub2, address(collateralToken), transferAmount, nonce))
+        );
         data = abi.encode(
             IExchange.TransferParams(main1, sub2, address(collateralToken), transferAmount, nonce, signature)
         );
@@ -1599,6 +1655,10 @@ contract BalanceExchangeTest is Test {
 
         // sub1 -> main2
         nonce++;
+        signature = _signTypedDataHash(
+            main1Key,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, sub1, main2, address(collateralToken), transferAmount, nonce))
+        );
         data = abi.encode(
             IExchange.TransferParams(sub1, main2, address(collateralToken), transferAmount, nonce, signature)
         );
@@ -1620,6 +1680,10 @@ contract BalanceExchangeTest is Test {
 
         // sub1 -> sub2
         nonce++;
+        signature = _signTypedDataHash(
+            main1Key,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, sub1, sub2, address(collateralToken), transferAmount, nonce))
+        );
         data =
             abi.encode(IExchange.TransferParams(sub1, sub2, address(collateralToken), transferAmount, nonce, signature));
         operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
@@ -1629,6 +1693,290 @@ contract BalanceExchangeTest is Test {
             address(collateralToken),
             sub1,
             sub2,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transfer_emitsFailedIfSelfTransfer() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+
+        uint256 amount = 300e18;
+        _deposit(main, address(collateralToken), amount);
+
+        uint64 nonce = 1;
+        uint256 transferAmount = 100e18;
+        bytes memory signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main, main, address(collateralToken), transferAmount, nonce))
+        );
+        bytes memory data =
+            abi.encode(IExchange.TransferParams(main, main, address(collateralToken), transferAmount, nonce, signature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main,
+            main,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transfer_emitsFailedIfTransferToVault() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        address vault = _registerVault();
+
+        // deposit to main and vault
+        _deposit(main, address(collateralToken), 300e18);
+        _deposit(vault, address(collateralToken), 300e18);
+
+        uint256 transferAmount = 100e18;
+        bytes memory signature;
+
+        // main -> vault
+        uint64 nonce = 1;
+        signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main, vault, address(collateralToken), transferAmount, nonce))
+        );
+        bytes memory data = abi.encode(
+            IExchange.TransferParams(main, vault, address(collateralToken), transferAmount, nonce, signature)
+        );
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main,
+            vault,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // vault -> main
+        nonce = 2;
+        signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, vault, main, address(collateralToken), transferAmount, nonce))
+        );
+        data = abi.encode(
+            IExchange.TransferParams(vault, main, address(collateralToken), transferAmount, nonce, signature)
+        );
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            vault,
+            main,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transfer_emitsFailedIfTransferToDeletedAccount() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        (address sub, uint256 subKey) = makeAddrAndKey("sub");
+        _createSubaccount(main, mainKey, sub, subKey);
+
+        // delete subaccount
+        bytes32 structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, sub));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory deleteSubacountData = abi.encode(IExchange.DeleteSubaccountParams(main, sub, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // deposit to main and sub
+        _deposit(main, address(collateralToken), 300e18);
+        _deposit(sub, address(collateralToken), 300e18);
+
+        uint256 transferAmount = 100e18;
+        bytes memory signature;
+        bytes memory data;
+
+        // main -> deleted subaccount
+        uint64 nonce = 1;
+        signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main, sub, address(collateralToken), transferAmount, nonce))
+        );
+        data =
+            abi.encode(IExchange.TransferParams(main, sub, address(collateralToken), transferAmount, nonce, signature));
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main,
+            sub,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // deleted subaccount -> main
+        nonce = 2;
+        signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, sub, main, address(collateralToken), transferAmount, nonce))
+        );
+        data =
+            abi.encode(IExchange.TransferParams(sub, main, address(collateralToken), transferAmount, nonce, signature));
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            sub,
+            main,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transfer_emitsFailedIfInsufficientBalance() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        (address sub, uint256 subKey) = makeAddrAndKey("sub");
+        _createSubaccount(main, mainKey, sub, subKey);
+
+        // deposit to main and sub
+        _deposit(main, address(collateralToken), 10e18);
+        _deposit(main, address(collateralToken), 10e18);
+
+        uint256 transferAmount = 100e18;
+        uint256 nonce;
+        bytes memory data;
+        bytes memory operation;
+
+        // main -> sub
+        nonce++;
+        bytes memory signature = _signTypedDataHash(
+            mainKey,
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main, sub, address(collateralToken), transferAmount, nonce))
+        );
+        data =
+            abi.encode(IExchange.TransferParams(main, sub, address(collateralToken), transferAmount, nonce, signature));
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main,
+            sub,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // sub -> main
+        nonce++;
+        signature = _signTypedDataHash(
+            subKey, keccak256(abi.encode(TRANSFER_TYPEHASH, sub, main, address(collateralToken), transferAmount, nonce))
+        );
+        data =
+            abi.encode(IExchange.TransferParams(sub, main, address(collateralToken), transferAmount, nonce, signature));
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            sub,
+            main,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_transfer_emitsFailedIfInvalidSignature() public {
+        (address main, uint256 mainKey) = makeAddrAndKey("main");
+        (address sub, uint256 subKey) = makeAddrAndKey("sub");
+        _createSubaccount(main, mainKey, sub, subKey);
+
+        // deposit to main and sub
+        _deposit(main, address(collateralToken), 300e18);
+        _deposit(sub, address(collateralToken), 300e18);
+
+        uint256 transferAmount = 100e18;
+        uint256 nonce;
+        bytes memory data;
+        bytes memory operation;
+
+        // main -> sub
+        nonce++;
+        bytes memory invalidSignature = _signTypedDataHash(
+            uint256(123),
+            keccak256(abi.encode(TRANSFER_TYPEHASH, main, sub, address(collateralToken), transferAmount, nonce))
+        );
+        data = abi.encode(
+            IExchange.TransferParams(main, sub, address(collateralToken), transferAmount, nonce, invalidSignature)
+        );
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            main,
+            sub,
+            address(0),
+            nonce,
+            int256(transferAmount),
+            IExchange.ActionStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // sub -> main
+        nonce++;
+        invalidSignature = _signTypedDataHash(
+            uint256(456),
+            keccak256(abi.encode(TRANSFER_TYPEHASH, sub, main, address(collateralToken), transferAmount, nonce))
+        );
+        data = abi.encode(
+            IExchange.TransferParams(sub, main, address(collateralToken), transferAmount, nonce, invalidSignature)
+        );
+        operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(
+            address(collateralToken),
+            sub,
+            main,
             address(0),
             nonce,
             int256(transferAmount),

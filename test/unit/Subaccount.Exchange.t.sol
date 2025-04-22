@@ -41,8 +41,8 @@ contract ExchangeTest is Test {
     bytes32 private constant TYPE_HASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant CREATE_SUBACCOUNT_TYPEHASH = keccak256("CreateSubaccount(address main,address subaccount)");
-    bytes32 public constant DELETE_SUBACCOUNT_TYPEHASH = keccak256("DeleteSubaccount(address main,address subaccount)");
-    bytes32 public constant REGISTER_SUBACCOUNT_SIGNER_TYPEHASH = keccak256(
+    bytes32 private constant DELETE_SUBACCOUNT_TYPEHASH = keccak256("DeleteSubaccount(address main,address subaccount)");
+    bytes32 private constant REGISTER_SUBACCOUNT_SIGNER_TYPEHASH = keccak256(
         "RegisterSubaccountSigner(address main,address subaccount,address signer,string message,uint64 nonce)"
     );
     bytes32 public constant SIGN_KEY_TYPEHASH = keccak256("SignKey(address account)");
@@ -109,30 +109,41 @@ contract ExchangeTest is Test {
     }
 
     function test_createSubaccount_succeeds() public {
-        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+        address[] memory subaccounts = new address[](10);
+        for (uint256 i = 0; i < 10; i++) {
+            (address subaccount, uint256 subKey) = makeAddrAndKey(string(abi.encodePacked("subaccount", i)));
+            subaccounts[i] = subaccount;
 
-        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
-        bytes memory mainSignature = _signTypedData(mainKey, structHash);
-        bytes memory subSignature = _signTypedData(subKey, structHash);
+            bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+            bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+            bytes memory subSignature = _signTypedDataHash(subKey, structHash);
 
-        vm.expectEmit(address(exchange));
-        emit IExchange.CreateSubaccount(main, subaccount);
+            vm.expectEmit(address(exchange));
+            emit IExchange.CreateSubaccount(main, subaccount);
 
-        vm.prank(sequencer);
-        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+            vm.prank(sequencer);
+            exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+        }
 
         IExchange.Account memory mainAccount = exchange.accounts(main);
         assertEq(mainAccount.main, address(0));
         assertEq(uint8(mainAccount.accountType), uint8(IExchange.AccountType.Main));
         assertEq(uint8(mainAccount.state), uint8(IExchange.AccountState.Active));
-        assertEq(mainAccount.subaccounts.length, 1);
-        assertEq(mainAccount.subaccounts[0], subaccount);
+        assertEq(mainAccount.subaccounts.length, 10);
 
-        IExchange.Account memory subAccount = exchange.accounts(subaccount);
-        assertEq(subAccount.main, main);
-        assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
-        assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Active));
-        assertEq(subAccount.subaccounts.length, 0);
+        address[] memory subaccountList = exchange.getSubaccounts(main);
+        assertEq(subaccountList.length, 10);
+
+        for (uint256 i = 0; i < 10; i++) {
+            assertEq(subaccountList[i], mainAccount.subaccounts[i]);
+            assertEq(subaccountList[i], subaccounts[i]);
+
+            IExchange.Account memory subAccount = exchange.accounts(subaccounts[i]);
+            assertEq(subAccount.main, main);
+            assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
+            assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Active));
+            assertEq(subAccount.subaccounts.length, 0);
+        }
     }
 
     function test_createSubaccount_revertsIfUnauthorized() public {
@@ -148,13 +159,132 @@ contract ExchangeTest is Test {
         exchange.createSubaccount(main, address(1), signature, signature);
     }
 
+    function test_createSubaccount_revertsIfSubaccountIsTheSameAsMain() public {
+        (address subaccount, uint256 subKey) = (main, mainKey);
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Subaccount_SameAsMainAccount.selector, subaccount));
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+    }
+
+    function test_createSubaccount_revertsIfInvalidMainAccount() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // main account is already a subaccount
+        main = subaccount;
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, main));
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, address(1), mainSignature, subSignature);
+    }
+
+    function test_createSubaccount_revertsIfInvalidSubaccount() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // subaccount is already a subaccount
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, subaccount));
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // subaccount is a main account
+        subaccount = main;
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Subaccount_IsMainAccount.selector, subaccount));
+        vm.prank(sequencer);
+        exchange.createSubaccount(address(1), subaccount, mainSignature, subSignature);
+    }
+
+    function test_createSubaccount_revertsIfSubaccountBSX1000BalanceNotZero() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        // bsx1000 balance > 0
+        vm.mockCall(
+            address(bsx1000), abi.encodeWithSelector(BSX1000x.getBalance.selector, subaccount), abi.encode(1e18, 0)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.Exchange_Subaccount_BSX1000_NonzeroBalance.selector, subaccount, address(token)
+            )
+        );
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        vm.mockCall(
+            address(bsx1000), abi.encodeWithSelector(BSX1000x.getBalance.selector, subaccount), abi.encode(0, 2e18)
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.Exchange_Subaccount_BSX1000_NonzeroBalance.selector, subaccount, address(token)
+            )
+        );
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+    }
+
+    function test_createSubaccount_revertsIfSubaccountPerpBalanceNotZero() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        // perp balance > 0
+        vm.prank(address(exchange));
+        clearingService.deposit(subaccount, 1e18, address(token));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                Errors.Exchange_Subaccount_Exchange_NonzeroBalance.selector, subaccount, address(token)
+            )
+        );
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+    }
+
+    function test_createSubaccount_revertsIfSubaccountJoinedVault() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        vm.mockCall(address(vaultManager), abi.encodeWithSignature("vaultCount(address)", subaccount), abi.encode(1));
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Subaccount_JoinedVault.selector, subaccount));
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+    }
+
     function test_createSubaccount_revertsIfInvalidSignature() public {
         (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
 
         bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
-        bytes memory mainSignature = _signTypedData(mainKey, structHash);
-        bytes memory subSignature = _signTypedData(subKey, structHash);
-        bytes memory maliciousSignature = _signTypedData(123, structHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        bytes memory maliciousSignature = _signTypedDataHash(123, structHash);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidSignature.selector, main));
         vm.prank(sequencer);
@@ -171,29 +301,42 @@ contract ExchangeTest is Test {
 
         // create 2 subaccounts
         bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, sub1));
-        bytes memory mainSignature = _signTypedData(mainKey, structHash);
-        bytes memory subSignature = _signTypedData(sub1Key, structHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(sub1Key, structHash);
         vm.prank(sequencer);
         exchange.createSubaccount(main, sub1, mainSignature, subSignature);
 
         structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, sub2));
-        mainSignature = _signTypedData(mainKey, structHash);
-        subSignature = _signTypedData(sub2Key, structHash);
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+        subSignature = _signTypedDataHash(sub2Key, structHash);
         vm.prank(sequencer);
         exchange.createSubaccount(main, sub2, mainSignature, subSignature);
 
+        // deposit to subaccount accounts
+        vm.startPrank(address(exchange));
+        clearingService.deposit(sub1, 100e18, address(token));
+        clearingService.deposit(sub2, 200e18, address(token));
+        vm.stopPrank();
+
         // delete sub1
         structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, sub1));
-        mainSignature = _signTypedData(mainKey, structHash);
+        mainSignature = _signTypedDataHash(mainKey, structHash);
 
         bytes memory deleteSubacountData = abi.encode(IExchange.DeleteSubaccountParams(main, sub1, mainSignature));
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Transfer(address(token), sub1, main, address(0), 0, 100e18, IExchange.ActionStatus.Success);
 
         vm.expectEmit(address(exchange));
         emit IExchange.DeleteSubaccount(main, sub1, IExchange.ActionStatus.Success);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.balanceOf(sub1, address(token)), 0);
+        assertEq(exchange.balanceOf(sub2, address(token)), 200e18);
+        assertEq(exchange.balanceOf(main, address(token)), 100e18);
 
         IExchange.Account memory mainAccount = exchange.accounts(main);
         assertEq(mainAccount.main, address(0));
@@ -219,13 +362,13 @@ contract ExchangeTest is Test {
         (address sub, uint256 subKey) = makeAddrAndKey("sub");
 
         bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, sub));
-        bytes memory mainSignature = _signTypedData(mainKey, structHash);
-        bytes memory subSignature = _signTypedData(subKey, structHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
         vm.prank(sequencer);
         exchange.createSubaccount(main, sub, mainSignature, subSignature);
 
         structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, sub));
-        bytes memory maliciousSignature = _signTypedData(123, structHash);
+        bytes memory maliciousSignature = _signTypedDataHash(123, structHash);
 
         bytes memory deleteSubacountData = abi.encode(IExchange.DeleteSubaccountParams(main, sub, maliciousSignature));
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
@@ -237,13 +380,238 @@ contract ExchangeTest is Test {
         exchange.processBatch(operation.toArray());
     }
 
-    function test_processBatch_registerSubaccountSigner() public {
+    function test_processBatch_deleteSubaccount_revertsIfInvalidMainAccount() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // deposit to subaccount accounts
+        vm.prank(address(exchange));
+        clearingService.deposit(subaccount, 100e18, address(token));
+
+        // main account is already a subaccount
+        address invalidMain = subaccount;
+        structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, invalidMain, subaccount));
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+
+        bytes memory deleteSubacountData =
+            abi.encode(IExchange.DeleteSubaccountParams(invalidMain, subaccount, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.DeleteSubaccount(invalidMain, subaccount, IExchange.ActionStatus.Failure);
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.balanceOf(subaccount, address(token)), 100e18);
+        assertEq(exchange.balanceOf(main, address(token)), 0);
+
+        IExchange.Account memory mainAccount = exchange.accounts(main);
+        assertEq(mainAccount.main, address(0));
+        assertEq(uint8(mainAccount.accountType), uint8(IExchange.AccountType.Main));
+        assertEq(uint8(mainAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(mainAccount.subaccounts.length, 1);
+        assertEq(mainAccount.subaccounts[0], subaccount);
+
+        IExchange.Account memory subAccount = exchange.accounts(subaccount);
+        assertEq(subAccount.main, main);
+        assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
+        assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(subAccount.subaccounts.length, 0);
+    }
+
+    function test_processBatch_deleteSubaccount_revertsIfInvalidSubaccount() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // deposit to subaccount accounts
+        vm.prank(address(exchange));
+        clearingService.deposit(subaccount, 100e18, address(token));
+
+        // subaccount is not a subaccount
+        address invalidSubaccount = address(1);
+        structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, invalidSubaccount));
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+
+        bytes memory deleteSubacountData =
+            abi.encode(IExchange.DeleteSubaccountParams(main, invalidSubaccount, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.DeleteSubaccount(main, invalidSubaccount, IExchange.ActionStatus.Failure);
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.balanceOf(subaccount, address(token)), 100e18);
+        assertEq(exchange.balanceOf(main, address(token)), 0);
+
+        IExchange.Account memory mainAccount = exchange.accounts(main);
+        assertEq(mainAccount.main, address(0));
+        assertEq(uint8(mainAccount.accountType), uint8(IExchange.AccountType.Main));
+        assertEq(uint8(mainAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(mainAccount.subaccounts.length, 1);
+        assertEq(mainAccount.subaccounts[0], subaccount);
+
+        IExchange.Account memory subAccount = exchange.accounts(subaccount);
+        assertEq(subAccount.main, main);
+        assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
+        assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(subAccount.subaccounts.length, 0);
+    }
+
+    function test_processBatch_deleteSubaccount_revertsIfMainAccountMismatch() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // deposit to subaccount accounts
+        vm.prank(address(exchange));
+        clearingService.deposit(subaccount, 100e18, address(token));
+
+        // main account mismatch
+        address anotherMain = address(1);
+        structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, anotherMain, subaccount));
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+
+        bytes memory deleteSubacountData =
+            abi.encode(IExchange.DeleteSubaccountParams(anotherMain, subaccount, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.DeleteSubaccount(anotherMain, subaccount, IExchange.ActionStatus.Failure);
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.balanceOf(subaccount, address(token)), 100e18);
+        assertEq(exchange.balanceOf(main, address(token)), 0);
+
+        IExchange.Account memory mainAccount = exchange.accounts(main);
+        assertEq(mainAccount.main, address(0));
+        assertEq(uint8(mainAccount.accountType), uint8(IExchange.AccountType.Main));
+        assertEq(uint8(mainAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(mainAccount.subaccounts.length, 1);
+        assertEq(mainAccount.subaccounts[0], subaccount);
+
+        IExchange.Account memory subAccount = exchange.accounts(subaccount);
+        assertEq(subAccount.main, main);
+        assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
+        assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(subAccount.subaccounts.length, 0);
+    }
+
+    function test_processBatch_deleteSubaccount_revertsISubaccountAlreadyDeleted() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // deposit to subaccount accounts
+        vm.prank(address(exchange));
+        clearingService.deposit(subaccount, 100e18, address(token));
+
+        structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+
+        bytes memory deleteSubacountData = abi.encode(IExchange.DeleteSubaccountParams(main, subaccount, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // delete subaccount again
+        operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.DeleteSubaccount(main, subaccount, IExchange.ActionStatus.Failure);
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.balanceOf(subaccount, address(token)), 0);
+        assertEq(exchange.balanceOf(main, address(token)), 100e18);
+
+        IExchange.Account memory mainAccount = exchange.accounts(main);
+        assertEq(mainAccount.main, address(0));
+        assertEq(uint8(mainAccount.accountType), uint8(IExchange.AccountType.Main));
+        assertEq(uint8(mainAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(mainAccount.subaccounts.length, 0);
+
+        IExchange.Account memory subAccount = exchange.accounts(subaccount);
+        assertEq(subAccount.main, main);
+        assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
+        assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Deleted));
+        assertEq(subAccount.subaccounts.length, 0);
+    }
+
+    function test_processBatch_deleteSubaccount_revertsISubaccountHasOpenPositions() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // deposit to subaccount accounts
+        vm.prank(address(exchange));
+        clearingService.deposit(subaccount, 100e18, address(token));
+
+        structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+
+        bytes memory deleteSubacountData = abi.encode(IExchange.DeleteSubaccountParams(main, subaccount, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+
+        vm.mockCall(address(perpEngine), abi.encodeWithSignature("openPositions(address)", subaccount), abi.encode(2));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.DeleteSubaccount(main, subaccount, IExchange.ActionStatus.Failure);
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(exchange.balanceOf(subaccount, address(token)), 100e18);
+        assertEq(exchange.balanceOf(main, address(token)), 0);
+
+        IExchange.Account memory mainAccount = exchange.accounts(main);
+        assertEq(mainAccount.main, address(0));
+        assertEq(uint8(mainAccount.accountType), uint8(IExchange.AccountType.Main));
+        assertEq(uint8(mainAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(mainAccount.subaccounts.length, 1);
+        assertEq(mainAccount.subaccounts[0], subaccount);
+
+        IExchange.Account memory subAccount = exchange.accounts(subaccount);
+        assertEq(subAccount.main, main);
+        assertEq(uint8(subAccount.accountType), uint8(IExchange.AccountType.Subaccount));
+        assertEq(uint8(subAccount.state), uint8(IExchange.AccountState.Active));
+        assertEq(subAccount.subaccounts.length, 0);
+    }
+
+    function test_processBatch_registerSubaccountSigner_succeeds() public {
         (address subaccount, uint256 subaccountKey) = makeAddrAndKey("subaccount");
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
 
         bytes32 createSubHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
-        bytes memory mainSignature = _signTypedData(mainKey, createSubHash);
-        bytes memory subSignature = _signTypedData(subaccountKey, createSubHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, createSubHash);
+        bytes memory subSignature = _signTypedDataHash(subaccountKey, createSubHash);
 
         vm.prank(sequencer);
         exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
@@ -261,10 +629,10 @@ contract ExchangeTest is Test {
                 nonce
             )
         );
-        mainSignature = _signTypedData(mainKey, mainHash);
+        mainSignature = _signTypedDataHash(mainKey, mainHash);
 
         bytes32 signerHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, subaccount));
-        bytes memory signerSignature = _signTypedData(signerKey, signerHash);
+        bytes memory signerSignature = _signTypedDataHash(signerKey, signerHash);
 
         bytes memory registerSubaccountSignerData = abi.encode(
             IExchange.RegisterSubaccountSignerParams(
@@ -292,8 +660,8 @@ contract ExchangeTest is Test {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
 
         bytes32 createSubHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
-        bytes memory mainSignature = _signTypedData(mainKey, createSubHash);
-        bytes memory subSignature = _signTypedData(subaccountKey, createSubHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, createSubHash);
+        bytes memory subSignature = _signTypedDataHash(subaccountKey, createSubHash);
 
         vm.prank(sequencer);
         exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
@@ -311,10 +679,10 @@ contract ExchangeTest is Test {
                 nonce
             )
         );
-        mainSignature = _signTypedData(123, mainHash);
+        mainSignature = _signTypedDataHash(123, mainHash);
 
         bytes32 signerHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, subaccount));
-        bytes memory signerSignature = _signTypedData(signerKey, signerHash);
+        bytes memory signerSignature = _signTypedDataHash(signerKey, signerHash);
 
         bytes memory registerSubaccountSignerData = abi.encode(
             IExchange.RegisterSubaccountSignerParams(
@@ -335,8 +703,8 @@ contract ExchangeTest is Test {
         (address signer,) = makeAddrAndKey("signer");
 
         bytes32 createSubHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
-        bytes memory mainSignature = _signTypedData(mainKey, createSubHash);
-        bytes memory subSignature = _signTypedData(subaccountKey, createSubHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, createSubHash);
+        bytes memory subSignature = _signTypedDataHash(subaccountKey, createSubHash);
 
         vm.prank(sequencer);
         exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
@@ -354,10 +722,10 @@ contract ExchangeTest is Test {
                 nonce
             )
         );
-        mainSignature = _signTypedData(123, mainHash);
+        mainSignature = _signTypedDataHash(123, mainHash);
 
         bytes32 signerHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, subaccount));
-        bytes memory signerSignature = _signTypedData(123, signerHash);
+        bytes memory signerSignature = _signTypedDataHash(123, signerHash);
 
         bytes memory registerSubaccountSignerData = abi.encode(
             IExchange.RegisterSubaccountSignerParams(
@@ -378,8 +746,8 @@ contract ExchangeTest is Test {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
 
         bytes32 createSubHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
-        bytes memory mainSignature = _signTypedData(mainKey, createSubHash);
-        bytes memory subSignature = _signTypedData(subaccountKey, createSubHash);
+        bytes memory mainSignature = _signTypedDataHash(mainKey, createSubHash);
+        bytes memory subSignature = _signTypedDataHash(subaccountKey, createSubHash);
 
         vm.prank(sequencer);
         exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
@@ -397,10 +765,10 @@ contract ExchangeTest is Test {
                 nonce
             )
         );
-        mainSignature = _signTypedData(mainKey, mainHash);
+        mainSignature = _signTypedDataHash(mainKey, mainHash);
 
         bytes32 signerHash = keccak256(abi.encode(SIGN_KEY_TYPEHASH, subaccount));
-        bytes memory signerSignature = _signTypedData(signerKey, signerHash);
+        bytes memory signerSignature = _signTypedDataHash(signerKey, signerHash);
 
         bytes memory registerSubaccountSignerData = abi.encode(
             IExchange.RegisterSubaccountSignerParams(
@@ -428,6 +796,102 @@ contract ExchangeTest is Test {
         exchange.processBatch(operation.toArray());
     }
 
+    function test_processBatch_registerSubaccountSigner_revertsIfInvalidMainAccount() public {
+        (address subaccount, uint256 subaccountKey) = makeAddrAndKey("subaccount");
+        address signer = address(2);
+
+        bytes32 createSubHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, createSubHash);
+        bytes memory subSignature = _signTypedDataHash(subaccountKey, createSubHash);
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // main account is already a subaccount
+        main = subaccount;
+
+        bytes memory registerSubaccountSignerData =
+            abi.encode(IExchange.RegisterSubaccountSignerParams(main, subaccount, signer, "", 1, bytes(""), bytes("")));
+        bytes memory operation =
+            _encodeDataToOperation(IExchange.OperationType.RegisterSubaccountSigner, registerSubaccountSignerData);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, main));
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_registerSubaccountSigner_revertsIfInvalidSubaccount() public {
+        address subaccount = address(1);
+        address signer = address(2);
+
+        bytes memory registerSubaccountSignerData =
+            abi.encode(IExchange.RegisterSubaccountSignerParams(main, subaccount, signer, "", 1, bytes(""), bytes("")));
+        bytes memory operation =
+            _encodeDataToOperation(IExchange.OperationType.RegisterSubaccountSigner, registerSubaccountSignerData);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, subaccount));
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_registerSubaccountSigner_revertsIfSubaccountDeleted() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        structHash = keccak256(abi.encode(DELETE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        mainSignature = _signTypedDataHash(mainKey, structHash);
+
+        bytes memory deleteSubacountData = abi.encode(IExchange.DeleteSubaccountParams(main, subaccount, mainSignature));
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        // subaccount is already deleted
+        address signer = address(2);
+        bytes memory registerSubaccountSignerData =
+            abi.encode(IExchange.RegisterSubaccountSignerParams(main, subaccount, signer, "", 1, bytes(""), bytes("")));
+        operation =
+            _encodeDataToOperation(IExchange.OperationType.RegisterSubaccountSigner, registerSubaccountSignerData);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_Subaccount_NotActive.selector, subaccount));
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
+    function test_processBatch_registerSubaccountSigner_revertsIfMainAccountMismatch() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+
+        // subaccount is already deleted
+        address anotherMain = address(1);
+        address signer = address(2);
+        bytes memory registerSubaccountSignerData = abi.encode(
+            IExchange.RegisterSubaccountSignerParams(anotherMain, subaccount, signer, "", 1, bytes(""), bytes(""))
+        );
+        bytes memory operation =
+            _encodeDataToOperation(IExchange.OperationType.RegisterSubaccountSigner, registerSubaccountSignerData);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Errors.Exchange_Subaccount_MainAccountMismatch.selector, anotherMain, main)
+        );
+
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+    }
+
     function _encodeDataToOperation(IExchange.OperationType operationType, bytes memory data)
         private
         view
@@ -437,7 +901,7 @@ contract ExchangeTest is Test {
         return abi.encodePacked(operationType, transactionId, data);
     }
 
-    function _signTypedData(uint256 privateKey, bytes32 structHash) private view returns (bytes memory) {
+    function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory) {
         return Helper.signTypedDataHash(exchange, privateKey, structHash);
     }
 }

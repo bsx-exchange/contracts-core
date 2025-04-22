@@ -33,7 +33,7 @@ library Errors {
     /// @notice Thrown when withdraw is disabled
     error Exchange_DisabledWithdraw();
 
-    /// @notice Thrown when depositting or withdrawing insurance fund with invalid token
+    /// @notice Thrown when depositing or withdrawing insurance fund with invalid token
     error Exchange_NotCollateralToken();
 
     /// @notice Thrown when adding a token that is already supported
@@ -185,8 +185,11 @@ library Errors {
     /// @notice Thrown when account type is invalid
     error Exchange_InvalidAccountType(address account);
 
-    /// @notice ThroThrown when attempting to register a main account as a subaccount
+    /// @notice Thrown when attempting to register a main account as a subaccount
     error Exchange_Subaccount_IsMainAccount(address subaccount);
+
+    /// @notice Thrown when the subaccount is the same as the main account
+    error Exchange_Subaccount_SameAsMainAccount(address subaccount);
 
     /// @notice Thrown when subaccount is not active
     error Exchange_Subaccount_NotActive(address subaccount);
@@ -194,8 +197,11 @@ library Errors {
     /// @notice Thrown when submitted main account does not match the current main account
     error Exchange_Subaccount_MainAccountMismatch(address submitted, address expected);
 
-    /// @notice Thrown when creating a subaccount with a nonzero token balance
-    error Exchange_Subaccount_NonzeroBalance(address subaccount, address token);
+    /// @notice Thrown when creating a subaccount with a nonzero BSX1000 balance
+    error Exchange_Subaccount_BSX1000_NonzeroBalance(address subaccount, address token);
+
+    /// @notice Thrown when creating a subaccount with a nonzero main exchange balance
+    error Exchange_Subaccount_Exchange_NonzeroBalance(address subaccount, address token);
 
     /// @notice Thrown when subaccount has insufficient balance
     error Exchange_Subaccount_JoinedVault(address joinedVault);
