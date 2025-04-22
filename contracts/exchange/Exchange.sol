@@ -586,9 +586,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @dev Call to vault manager to stake
     function _stakeVault(StakeVaultParams memory data) internal {
         IVaultManager vaultManager = access.getVaultManager();
-        if (vaultManager.isStakeNonceUsed(data.account, data.nonce)) {
-            revert Errors.Vault_Stake_UsedNonce(data.account, data.nonce);
+        if (_isNonceUsed[data.account][data.nonce]) {
+            revert Errors.Exchange_NonceUsed(data.account, data.nonce);
         }
+        _isNonceUsed[data.account][data.nonce] = true;
 
         try vaultManager.stake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature) returns (
             uint256 shares
@@ -604,9 +605,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @dev Call to vault manager to unstake
     function _unstakeVault(UnstakeVaultParams memory data) internal {
         IVaultManager vaultManager = access.getVaultManager();
-        if (vaultManager.isUnstakeNonceUsed(data.account, data.nonce)) {
-            revert Errors.Vault_Unstake_UsedNonce(data.account, data.nonce);
+        if (_isNonceUsed[data.account][data.nonce]) {
+            revert Errors.Exchange_NonceUsed(data.account, data.nonce);
         }
+        _isNonceUsed[data.account][data.nonce] = true;
 
         try vaultManager.unstake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature)
         returns (uint256 shares, uint256 fee, address feeRecipient) {

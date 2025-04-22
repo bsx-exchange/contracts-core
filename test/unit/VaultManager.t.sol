@@ -135,6 +135,11 @@ contract VaultManagerTest is Test {
         vm.prank(sequencer);
         exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
 
+        vm.expectRevert(abi.encodeWithSelector(Errors.Vault_AlreadyRegistered.selector, vault));
+
+        vm.prank(address(exchange));
+        vaultManager.registerVault(vault, feeRecipient, profitShareBps, signature);
+
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, vault));
 
         vm.prank(sequencer);
@@ -399,6 +404,50 @@ contract VaultManagerTest is Test {
         vaultManager.stake(vault, staker, address(asset), 0, 0, signature);
     }
 
+    function test_stake_revertIfNotMainAccount() public {
+        _registerVault();
+
+        uint256 stakeAmount = 10 ether;
+        uint256 nonce = 5;
+        bytes32 structHash =
+            keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
+        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory operation = _encodeDataToOperation(
+            IExchange.OperationType.StakeVault,
+            abi.encode(
+                IExchange.StakeVaultParams({
+                    vault: vault,
+                    account: staker,
+                    token: address(asset),
+                    amount: stakeAmount,
+                    nonce: nonce,
+                    signature: signature
+                })
+            )
+        );
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, staker),
+            abi.encode(IExchange.AccountType.Subaccount)
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, staker));
+        vm.prank(address(exchange));
+        vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
+
+        uint256 expectedShares = 0;
+        vm.expectEmit(address(exchange));
+        emit IExchange.StakeVault(
+            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Failure
+        );
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
+
+        assertEq(vaultManager.vaultCount(staker), 0);
+        assertEq(exchange.isNonceUsed(staker, nonce), true);
+    }
+
     function test_stake_revertIfVaultNotRegistered() public {
         address notVault = makeAddr("notVault");
 
@@ -430,6 +479,9 @@ contract VaultManagerTest is Test {
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
+
+        assertEq(vaultManager.vaultCount(staker), 0);
+        assertEq(exchange.isNonceUsed(staker, nonce), true);
     }
 
     function test_stake_revertIfUsedNonce() public {
@@ -441,27 +493,26 @@ contract VaultManagerTest is Test {
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
         bytes memory signature = _signTypedData(stakerPrivKey, structHash);
-        bytes memory operation = _encodeDataToOperation(
-            IExchange.OperationType.StakeVault,
-            abi.encode(
-                IExchange.StakeVaultParams({
-                    vault: vault,
-                    account: staker,
-                    token: address(asset),
-                    amount: stakeAmount,
-                    nonce: nonce,
-                    signature: signature
-                })
-            )
+        bytes memory stakeData = abi.encode(
+            IExchange.StakeVaultParams({
+                vault: vault,
+                account: staker,
+                token: address(asset),
+                amount: stakeAmount,
+                nonce: nonce,
+                signature: signature
+            })
         );
-        vm.prank(address(exchange));
-        vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.StakeVault, stakeData);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
 
         vm.expectRevert(abi.encodeWithSelector(Errors.Vault_Stake_UsedNonce.selector, staker, nonce));
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
-        vm.expectRevert(abi.encodeWithSelector(Errors.Vault_Stake_UsedNonce.selector, staker, nonce));
+        operation = _encodeDataToOperation(IExchange.OperationType.StakeVault, stakeData);
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_NonceUsed.selector, staker, nonce));
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
     }
@@ -508,6 +559,9 @@ contract VaultManagerTest is Test {
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
+
+        assertEq(vaultManager.vaultCount(staker), 0);
+        assertEq(exchange.isNonceUsed(staker, nonce), true);
     }
 
     function test_stake_revertIfInvalidSignature() public {
@@ -544,6 +598,9 @@ contract VaultManagerTest is Test {
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
+
+        assertEq(vaultManager.vaultCount(staker), 0);
+        assertEq(exchange.isNonceUsed(staker, nonce), true);
     }
 
     function test_stake_revertIfInsufficientBalance() public {
@@ -582,6 +639,9 @@ contract VaultManagerTest is Test {
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
+
+        assertEq(vaultManager.vaultCount(staker), 0);
+        assertEq(exchange.isNonceUsed(staker, nonce), true);
     }
 
     function test_stake_coverVaultLoss_stakeAmountOverLoss() public {
@@ -711,6 +771,7 @@ contract VaultManagerTest is Test {
         exchange.processBatch(operation.toArray());
 
         // 2. unstake 60 ether with price 1 ether => 60 shares
+        nonce = 345;
         uint256 unstakeAmount = 60 ether;
         uint256 expectedShares = 60 ether;
         uint256 expectedFee = 0;
@@ -847,6 +908,7 @@ contract VaultManagerTest is Test {
         spotEngine.updateBalance(vault, address(asset), int256(increasedAmount));
 
         // unstake 60 ether with price 1.5 ether => 40 shares
+        nonce = 345;
         uint256 fee = 2 ether;
         uint256 unstakeAmount = 60 ether;
         uint256 expectedShares = 40 ether;
@@ -968,27 +1030,26 @@ contract VaultManagerTest is Test {
         uint256 unstakeAmount = 5 ether;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
         signature = _signTypedData(stakerPrivKey, structHash);
-        bytes memory operation = _encodeDataToOperation(
-            IExchange.OperationType.UnstakeVault,
-            abi.encode(
-                IExchange.UnstakeVaultParams({
-                    vault: vault,
-                    account: staker,
-                    token: address(asset),
-                    amount: unstakeAmount,
-                    nonce: nonce,
-                    signature: signature
-                })
-            )
+        bytes memory unstakeData = abi.encode(
+            IExchange.UnstakeVaultParams({
+                vault: vault,
+                account: staker,
+                token: address(asset),
+                amount: unstakeAmount,
+                nonce: nonce,
+                signature: signature
+            })
         );
-        vm.prank(address(exchange));
-        vaultManager.unstake(vault, staker, address(asset), unstakeAmount, nonce, signature);
+        bytes memory operation = _encodeDataToOperation(IExchange.OperationType.UnstakeVault, unstakeData);
+        vm.prank(sequencer);
+        exchange.processBatch(operation.toArray());
 
         vm.expectRevert(abi.encodeWithSelector(Errors.Vault_Unstake_UsedNonce.selector, staker, nonce));
         vm.prank(address(exchange));
         vaultManager.unstake(vault, staker, address(asset), unstakeAmount, nonce, signature);
 
-        vm.expectRevert(abi.encodeWithSelector(Errors.Vault_Unstake_UsedNonce.selector, staker, nonce));
+        operation = _encodeDataToOperation(IExchange.OperationType.UnstakeVault, unstakeData);
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_NonceUsed.selector, staker, nonce));
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
     }
