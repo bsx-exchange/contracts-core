@@ -66,6 +66,16 @@ library MathHelper {
         scaledAmount = _convertToScale(rawAmount, decimals);
     }
 
+    function roundUpScale(uint256 scaledAmount, address token) internal view returns (uint256 roundUp) {
+        IERC20Extend product = IERC20Extend(token);
+        uint8 decimals = product.decimals();
+        uint256 rawAmount = _convertFromScale(scaledAmount, decimals);
+        roundUp = _convertToScale(rawAmount, decimals);
+        if (roundUp != scaledAmount) {
+            roundUp = _convertToScale(rawAmount + 1, decimals);
+        }
+    }
+
     function safeUInt256(int256 n) internal pure returns (uint256) {
         if (n < 0) revert InvalidUInt256();
         return uint256(n);

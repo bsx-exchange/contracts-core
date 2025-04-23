@@ -155,6 +155,21 @@ contract MathHelperTest is Test {
         assertEq(roundDownAmount, 100 * 1e18);
     }
 
+    function test_roundUpScale() public view {
+        assertEq(token.decimals(), 6);
+
+        // Amount is already a multiple of 1e6, should REMAIN
+        uint256 scaledAmount = 100 ether;
+        uint256 roundUpAmount = MathHelper.roundUpScale(scaledAmount, address(token));
+        assertEq(roundUpAmount, 100 ether);
+
+        // Amount is not a multiple of 1e6, should ROUND UP
+        scaledAmount = 100.0000002 ether;
+        roundUpAmount = MathHelper.roundUpScale(scaledAmount, address(token));
+        assertGt(roundUpAmount, scaledAmount);
+        assertEq(roundUpAmount, 100.000001 ether);
+    }
+
     function test_safeUInt256() public view {
         int256 n = 100;
         assertEq(mathHelperCall.safeUInt256(n), 100);

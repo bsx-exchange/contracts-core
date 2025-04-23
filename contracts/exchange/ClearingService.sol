@@ -169,7 +169,7 @@ contract ClearingService is IClearingService, Initializable {
         int256 balance = access.getSpotEngine().getBalance(token, account);
         if (balance >= 0) return;
 
-        uint256 loss = balance.abs();
+        uint256 loss = balance.abs().roundUpScale(token);
         uint256 maxWithdrawAmount = _maxWithdrawFromVault(vault, token, account);
         uint256 minAmountOut = Math.min(loss, maxWithdrawAmount);
         uint256 amountIn = _previewWithdrawVault(vault, token, minAmountOut);
