@@ -340,6 +340,11 @@ contract ClearingService is IClearingService, Initializable {
         return _insuranceFund;
     }
 
+    /// @inheritdoc IClearingService
+    function getVaultShare(address account, address token) external view returns (VaultShare memory) {
+        return vaultShares[account][token];
+    }
+
     /// @dev Increase spot balance of an account and total balance
     function _deposit(address account, uint256 amount, address token) internal {
         ISpot spotEngine = access.getSpotEngine();

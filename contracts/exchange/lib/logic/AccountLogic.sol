@@ -53,12 +53,22 @@ library AccountLogic {
 
         // Check if the subaccount has no balance in BSX perp exchange
         ISpot spotEngine = access.getSpotEngine();
+        IClearingService clearingService = access.getClearingService();
         address[] memory supportedTokens = exchange.getSupportedTokenList();
         for (uint256 i = 0; i < supportedTokens.length; i++) {
             address token = supportedTokens[i];
             int256 balance = spotEngine.getBalance(token, subaccount);
             if (balance != 0) {
                 revert Errors.Exchange_Subaccount_Exchange_NonzeroBalance(subaccount, token);
+            }
+
+            // Check if the subaccount has no balance in yield asset
+            address yieldAsset = clearingService.yieldAssets(token);
+            if (yieldAsset != ZERO_ADDRESS) {
+                int256 yieldBalance = spotEngine.getBalance(yieldAsset, subaccount);
+                if (yieldBalance != 0) {
+                    revert Errors.Exchange_Subaccount_Exchange_NonzeroBalance(subaccount, yieldAsset);
+                }
             }
         }
 
@@ -116,11 +126,7 @@ library AccountLogic {
         address[] memory supportedTokens = exchange.getSupportedTokenList();
         for (uint256 i = 0; i < supportedTokens.length; i++) {
             address token = supportedTokens[i];
-            address yieldAsset = clearingService.yieldAssets(token);
             _transferSubToMain(clearingService, spotEngine, token, main, subaccount);
-            if (yieldAsset != address(0)) {
-                _transferSubToMain(clearingService, spotEngine, yieldAsset, main, subaccount);
-            }
         }
 
         // Check if the subaccount has no open position

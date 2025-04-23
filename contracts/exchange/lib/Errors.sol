@@ -118,6 +118,9 @@ library Errors {
     /// @notice Throw when transferring between from and to doesn't permit
     error Exchange_Transfer_NotAllowed(address from, address to);
 
+    /// @notice Thrown when transferring yield asset to another account
+    error Exchange_Transfer_YieldAsset(address token);
+
     /// @notice Thrown when transferring to BSX1000 with used nonce
     error Exchange_TransferToBSX1000_NonceUsed(address account, uint256 nonce);
 

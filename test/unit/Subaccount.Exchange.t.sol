@@ -263,6 +263,33 @@ contract ExchangeTest is Test {
         exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
     }
 
+    function test_createSubaccount_revertsIfSubaccountYieldBalanceNotZero() public {
+        (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
+
+        bytes32 structHash = keccak256(abi.encode(CREATE_SUBACCOUNT_TYPEHASH, main, subaccount));
+        bytes memory mainSignature = _signTypedDataHash(mainKey, structHash);
+        bytes memory subSignature = _signTypedDataHash(subKey, structHash);
+
+        address yieldAsset = makeAddr("yieldAsset");
+        vm.mockCall(
+            address(clearingService),
+            abi.encodeWithSignature("yieldAssets(address)", address(token)),
+            abi.encode(yieldAsset)
+        );
+        vm.mockCall(
+            address(spotEngine),
+            abi.encodeWithSelector(Spot.getBalance.selector, yieldAsset, subaccount),
+            abi.encode(1e18)
+        );
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Errors.Exchange_Subaccount_Exchange_NonzeroBalance.selector, subaccount, yieldAsset)
+        );
+
+        vm.prank(sequencer);
+        exchange.createSubaccount(main, subaccount, mainSignature, subSignature);
+    }
+
     function test_createSubaccount_revertsIfSubaccountJoinedVault() public {
         (address subaccount, uint256 subKey) = makeAddrAndKey("subaccount");
 

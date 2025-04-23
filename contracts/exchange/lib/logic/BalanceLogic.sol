@@ -142,6 +142,11 @@ library BalanceLogic {
         uint256 nonce = params.nonce;
         int256 amount = params.amount.safeInt256();
 
+        IClearingService.VaultShare memory vaultShare = engine.clearingService.getVaultShare(from, token);
+        if (vaultShare.shares > 0) {
+            revert Errors.Exchange_Transfer_YieldAsset(token);
+        }
+
         bool isValid = _validateTransfer(accounts, from, to);
         if (!isValid) {
             revert Errors.Exchange_Transfer_NotAllowed(from, to);
