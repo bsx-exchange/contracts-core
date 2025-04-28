@@ -151,6 +151,27 @@ contract ExchangeTest is Test {
         exchange.addSupportedToken(makeAddr("token"));
     }
 
+    function test_addSupportedToken_revertsIfZeroAddr() public {
+        vm.startPrank(sequencer);
+
+        vm.expectRevert(Errors.ZeroAddress.selector);
+        exchange.addSupportedToken(address(0));
+    }
+
+    function test_addSupportedToken_revertsIfTokenIsYieldAsset() public {
+        vm.startPrank(sequencer);
+        address token = makeAddr("token");
+        address yieldAsset = makeAddr("yieldAsset");
+
+        vm.mockCall(yieldAsset, abi.encodeWithSignature("asset()"), abi.encode(token));
+
+        exchange.addSupportedToken(token);
+        clearingService.addYieldAsset(token, yieldAsset);
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_TokenIsYieldAsset.selector, yieldAsset));
+        exchange.addSupportedToken(yieldAsset);
+    }
+
     function test_removeSupportedToken() public {
         vm.startPrank(sequencer);
 

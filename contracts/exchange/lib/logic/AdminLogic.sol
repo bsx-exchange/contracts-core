@@ -3,17 +3,52 @@ pragma solidity ^0.8.25;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+import {IClearingService} from "../../interfaces/IClearingService.sol";
 import {IExchange} from "../../interfaces/IExchange.sol";
 import {IOrderBook} from "../../interfaces/IOrderBook.sol";
-
+import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
-import {BSX_TOKEN, NATIVE_ETH} from "../../share/Constants.sol";
+import {BSX_TOKEN, NATIVE_ETH, ZERO_ADDRESS} from "../../share/Constants.sol";
 
 library AdminLogic {
+    using EnumerableSet for EnumerableSet.AddressSet;
     using MathHelper for int128;
     using MathHelper for uint256;
     using SafeERC20 for IERC20;
+
+    function addSupportedToken(
+        IClearingService clearingService,
+        EnumerableSet.AddressSet storage supportedTokens,
+        address token
+    ) external {
+        if (token == ZERO_ADDRESS) {
+            revert Errors.ZeroAddress();
+        }
+
+        for (uint256 i = 0; i < supportedTokens.length(); ++i) {
+            address supportedToken = supportedTokens.at(i);
+            address yieldAsset = clearingService.yieldAssets(supportedToken);
+            if (yieldAsset == token) {
+                revert Errors.Exchange_TokenIsYieldAsset(yieldAsset);
+            }
+        }
+
+        bool success = supportedTokens.add(token);
+        if (!success) {
+            revert Errors.Exchange_TokenAlreadySupported(token);
+        }
+        emit IExchange.SupportedTokenAdded(token);
+    }
+
+    function removeSupportedToken(EnumerableSet.AddressSet storage supportedTokens, address token) external {
+        bool success = supportedTokens.remove(token);
+        if (!success) {
+            revert Errors.Exchange_TokenNotSupported(token);
+        }
+        emit IExchange.SupportedTokenRemoved(token);
+    }
 
     function claimTradingFees(IOrderBook orderbook, address caller, address feeRecipient) external {
         IOrderBook.FeeCollection memory tradingFees = orderbook.claimTradingFees();

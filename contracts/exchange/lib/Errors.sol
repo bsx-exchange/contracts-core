@@ -36,6 +36,9 @@ library Errors {
     /// @notice Thrown when depositing or withdrawing insurance fund with invalid token
     error Exchange_NotCollateralToken();
 
+    /// @notice Thrown when the token is a yield asset
+    error Exchange_TokenIsYieldAsset(address yieldAsset);
+
     /// @notice Thrown when adding a token that is already supported
     error Exchange_TokenAlreadySupported(address token);
 

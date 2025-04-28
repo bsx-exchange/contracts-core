@@ -94,20 +94,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     /// @inheritdoc IExchange
     function addSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
-        bool success = supportedTokens.add(token);
-        if (!success) {
-            revert Errors.Exchange_TokenAlreadySupported(token);
-        }
-        emit SupportedTokenAdded(token);
+        return AdminLogic.addSupportedToken(clearingService, supportedTokens, token);
     }
 
     /// @inheritdoc IExchange
     function removeSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
-        bool success = supportedTokens.remove(token);
-        if (!success) {
-            revert Errors.Exchange_TokenNotSupported(token);
-        }
-        emit SupportedTokenRemoved(token);
+        return AdminLogic.removeSupportedToken(supportedTokens, token);
     }
 
     /// @inheritdoc IExchange
