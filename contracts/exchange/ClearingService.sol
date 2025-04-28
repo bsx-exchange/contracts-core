@@ -390,13 +390,14 @@ contract ClearingService is IClearingService, Initializable {
         if (swapType == SwapType.DepositVault) {
             uint256 assets = amountIn.convertFromScale(token);
             access.getExchange().requestToken(token, assets);
-            IERC20(token).forceApprove(vault, assets);
 
             tokenOut = vault;
             receiver = address(this);
             balanceBefore = IERC20(tokenOut).balanceOf(receiver);
 
+            IERC20(token).forceApprove(vault, assets);
             amountOut = IERC4626(vault).deposit(assets, address(this));
+            IERC20(token).forceApprove(vault, 0);
         } else if (swapType == SwapType.RedeemVault) {
             uint256 shares = amountIn.convertFromScale(vault);
 

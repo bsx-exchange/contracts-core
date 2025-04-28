@@ -201,6 +201,7 @@ library BalanceLogic {
 
         IERC20(params.token).forceApprove(address(bsx1000), amountToTransfer);
         bsx1000.deposit(params.account, params.amount);
+        IERC20(params.token).forceApprove(address(bsx1000), 0);
 
         newBalance = currentBalance.safeUInt256() - params.amount;
     }
