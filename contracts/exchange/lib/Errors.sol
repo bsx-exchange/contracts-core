@@ -246,6 +246,9 @@ library Errors {
     /// @notice Thrown when the amount out is less than expected
     error ClearingService_SwapYieldAsset_AmountOutTooLittle();
 
+    /// @notice Thrown when the amount out from vault is less than received
+    error ClearingService_Vault_AmountOutTooLittle();
+
     /// @notice Thrown when the account has insufficient balance
     error ClearingService_InsufficientBalance(address account, address token, int256 balance, uint256 amount);
 

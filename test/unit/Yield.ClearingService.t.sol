@@ -468,7 +468,7 @@ contract YieldClearingServiceTest is Test {
         clearingService.liquidateYieldAssetIfNecessary(user, token);
     }
 
-    function test_innerswapYieldAssetPermit_revertsIfCallerNotClearingService() public {
+    function test_innerSwapYieldAssetPermit_revertsIfCallerNotClearingService() public {
         address account;
         address assetIn;
         uint256 amountIn;
@@ -485,6 +485,69 @@ contract YieldClearingServiceTest is Test {
 
         vm.prank(admin);
         clearingService.innerSwapYieldAsset(account, assetIn, amountIn, assetOut, minAmountOut, swapType);
+    }
+
+    function test_innerSwapYieldAssetPermit_deposit_revertsIfVaultAmountOutMismatch() public {
+        vm.prank(admin);
+        clearingService.addYieldAsset(token, vault);
+
+        uint256 userBalance = 500e18;
+        _depositSpotAccount(user, userBalance, token);
+
+        uint256 mintShares = 300e18;
+        uint256 depositAssets = 300e18;
+
+        vm.mockCall(
+            vault,
+            abi.encodeWithSelector(
+                IERC4626.deposit.selector, depositAssets.convertFromScale(token), address(clearingService)
+            ),
+            abi.encode(mintShares + 1)
+        );
+
+        vm.expectRevert(Errors.ClearingService_Vault_AmountOutTooLittle.selector);
+
+        vm.prank(address(clearingService));
+        clearingService.innerSwapYieldAsset(
+            user, token, depositAssets, vault, mintShares, IClearingService.SwapType.DepositVault
+        );
+    }
+
+    function test_innerSwapYieldAssetPermit_redeem_revertsIfVaultAmountOutMismatch() public {
+        vm.prank(admin);
+        clearingService.addYieldAsset(token, vault);
+
+        uint256 userBalance = 500e18;
+        _depositSpotAccount(user, userBalance, token);
+
+        // deposit to the vault
+        uint256 depositAssets = 300e18;
+        vm.prank(address(clearingService));
+        clearingService.innerSwapYieldAsset(
+            user, token, depositAssets, vault, 0, IClearingService.SwapType.DepositVault
+        );
+
+        // redeem from the vault
+        uint256 redeemShares = 200e18;
+        uint256 withdrawAssets = 200e18;
+
+        vm.mockCall(
+            vault,
+            abi.encodeWithSelector(
+                IERC4626.redeem.selector,
+                redeemShares.convertFromScale(vault),
+                address(exchange),
+                address(clearingService)
+            ),
+            abi.encode(withdrawAssets + 1)
+        );
+
+        vm.expectRevert(Errors.ClearingService_Vault_AmountOutTooLittle.selector);
+
+        vm.prank(address(clearingService));
+        clearingService.innerSwapYieldAsset(
+            user, vault, redeemShares, token, withdrawAssets, IClearingService.SwapType.RedeemVault
+        );
     }
 
     function _depositSpotAccount(address _account, uint256 _amount, address _token) private {
