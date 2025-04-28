@@ -11,7 +11,7 @@ import {MockERC4626} from "../mock/MockERC4626.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 
 import {ClearingService, IClearingService} from "contracts/exchange/ClearingService.sol";
-import {Exchange} from "contracts/exchange/Exchange.sol";
+import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {OrderBook} from "contracts/exchange/OrderBook.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
@@ -308,6 +308,22 @@ contract YieldClearingServiceTest is Test {
         vm.expectRevert(Errors.Unauthorized.selector);
 
         vm.prank(admin);
+        clearingService.swapYieldAssetPermit(params);
+    }
+
+    function test_swapYieldAssetPermit_revertsIfNotMainAccount() public {
+        ISwap.SwapParams memory params;
+        params.account = user;
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, user),
+            abi.encode(IExchange.AccountType.Subaccount)
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, user));
+
+        vm.prank(address(exchange));
         clearingService.swapYieldAssetPermit(params);
     }
 

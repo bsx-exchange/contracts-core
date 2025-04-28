@@ -124,6 +124,8 @@ contract ClearingService is IClearingService, Initializable {
         uint256 minAmountOut = params.minAmountOut;
         uint256 nonce = params.nonce;
 
+        _assertMainAccount(account);
+
         SwapType swapType;
         if (yieldAssets[assetIn] == assetOut) {
             swapType = SwapType.DepositVault;
@@ -343,6 +345,13 @@ contract ClearingService is IClearingService, Initializable {
     /// @inheritdoc IClearingService
     function getVaultShare(address account, address token) external view returns (VaultShare memory) {
         return vaultShares[account][token];
+    }
+
+    /// @dev Assert that the account is a main account
+    function _assertMainAccount(address account) internal view {
+        if (access.getExchange().getAccountType(account) != IExchange.AccountType.Main) {
+            revert Errors.Exchange_InvalidAccountType(account);
+        }
     }
 
     /// @dev Increase spot balance of an account and total balance
