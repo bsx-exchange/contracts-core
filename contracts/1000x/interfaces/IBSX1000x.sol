@@ -251,6 +251,11 @@ interface IBSX1000x {
     /// @param amount Raw amount of token (in token decimals)
     function depositRaw(address account, address token, uint256 amount) external;
 
+    /// @notice Deposit the entire approved amount of a token to the exchange
+    /// @param account The account address
+    /// @param token Token address to deposit
+    function depositMaxApproved(address account, address token) external;
+
     /// @notice Deposit collateral to the exchange with authorization
     /// @param account The account address
     /// @param amount The amount to deposit (in 18 decimals)

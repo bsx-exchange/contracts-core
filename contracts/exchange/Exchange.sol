@@ -119,24 +119,29 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @inheritdoc IExchange
     function depositRaw(address recipient, address token, uint128 rawAmount) external payable {
         uint256 amount = token == NATIVE_ETH ? rawAmount : rawAmount.convertToScale(token);
-        deposit(recipient, token, amount.safeUInt128());
+        _deposit(recipient, token, amount, false);
     }
 
     /// @inheritdoc IExchange
     function deposit(address token, uint128 amount) external payable {
-        deposit(msg.sender, token, amount);
+        _deposit(msg.sender, token, amount, false);
     }
 
     /// @inheritdoc IExchange
-    function deposit(address recipient, address token, uint128 amount)
-        public
-        payable
-        enabledDeposit
-        supportedToken(token)
-        notVault(recipient)
-        notSubaccount(recipient)
-    {
-        BalanceLogic.deposit(BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount);
+    function deposit(address recipient, address token, uint128 amount) external payable {
+        _deposit(recipient, token, amount, false);
+    }
+
+    /// @inheritdoc IExchange
+    function depositAndEarn(address token, uint128 amount) external {
+        _deposit(msg.sender, token, amount, true);
+    }
+
+    /// @inheritdoc IExchange
+    function depositMaxApproved(address recipient, address token, bool earn) external {
+        uint256 rawAmount = IERC20(token).allowance(msg.sender, address(this));
+        uint256 amount = rawAmount.convertToScale(token);
+        _deposit(recipient, token, amount, earn);
     }
 
     /// @inheritdoc IExchange
@@ -148,23 +153,8 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) public enabledDeposit supportedToken(token) notVault(depositor) notSubaccount(depositor) {
-        BalanceLogic.depositWithAuthorization(
-            BalanceLogic.BalanceEngine(clearingService, spotEngine),
-            depositor,
-            token,
-            amount,
-            validAfter,
-            validBefore,
-            nonce,
-            signature
-        );
-    }
-
-    /// @inheritdoc IExchange
-    function depositAndEarn(address token, uint128 amount) external {
-        deposit(msg.sender, token, amount);
-        clearingService.earnYieldAsset(msg.sender, token, amount);
+    ) external {
+        _depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature, false);
     }
 
     /// @inheritdoc IExchange
@@ -177,8 +167,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         bytes32 nonce,
         bytes calldata signature
     ) external onlyRole(access.GENERAL_ROLE()) {
-        depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature);
-        clearingService.earnYieldAsset(depositor, token, amount);
+        _depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature, true);
     }
 
     /// @inheritdoc IExchange
@@ -427,6 +416,46 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
 
     function isNonceUsed(address account, uint256 nonce) public view override returns (bool) {
         return _isNonceUsed[account][nonce];
+    }
+
+    /// @dev Internal function to deposit tokens into the exchange
+    function _deposit(address recipient, address token, uint256 amount, bool earn)
+        internal
+        enabledDeposit
+        supportedToken(token)
+        notVault(recipient)
+        notSubaccount(recipient)
+    {
+        BalanceLogic.deposit(BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount);
+        if (earn) {
+            clearingService.earnYieldAsset(recipient, token, amount);
+        }
+    }
+
+    /// @dev Internal function to deposit tokens into the exchange with authorization
+    function _depositWithAuthorization(
+        address token,
+        address depositor,
+        uint256 amount,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        bytes calldata signature,
+        bool earn
+    ) internal enabledDeposit supportedToken(token) notVault(depositor) notSubaccount(depositor) {
+        BalanceLogic.depositWithAuthorization(
+            BalanceLogic.BalanceEngine(clearingService, spotEngine),
+            depositor,
+            token,
+            amount,
+            validAfter,
+            validBefore,
+            nonce,
+            signature
+        );
+        if (earn) {
+            clearingService.earnYieldAsset(depositor, token, amount);
+        }
     }
 
     /// @dev Handles a operation. Will revert if operation type is invalid.

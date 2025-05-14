@@ -233,6 +233,32 @@ contract BSX1000xTest is Test {
         bsx1000x.depositWithAuthorization(account, maxZeroScaledAmount, 0, 0, 0, "");
     }
 
+    function test_depositMaxApproved() public {
+        address account = makeAddr("account");
+        address recipient = makeAddr("recipient");
+        uint256 totalAmount;
+        uint8 tokenDecimals = collateralToken.decimals();
+
+        vm.startPrank(account);
+
+        for (uint256 i = 1; i < 5; i++) {
+            uint256 rawAmount = i * 500_000;
+            collateralToken.mint(account, rawAmount);
+            collateralToken.approve(address(bsx1000x), rawAmount);
+
+            uint256 amount = rawAmount.convertTo18D(tokenDecimals);
+            totalAmount += amount;
+
+            emit IBSX1000x.Deposit(recipient, amount, totalAmount);
+            bsx1000x.depositRaw(recipient, address(collateralToken), rawAmount);
+
+            IBSX1000x.Balance memory balance = bsx1000x.getBalance(recipient);
+            assertEq(balance.available, totalAmount);
+            assertEq(balance.locked, 0);
+            assertEq(collateralToken.balanceOf(address(bsx1000x)), totalAmount.convertFrom18D(tokenDecimals));
+        }
+    }
+
     function test_transferToExchange_withEOA() public {
         (address account, uint256 accountKey) = makeAddrAndKey("account");
         uint256 balance = 100 * 1e18;

@@ -377,6 +377,13 @@ interface IExchange is ILiquidation, ISwap {
         bytes memory signature
     ) external;
 
+    /// @notice Deposits the entire approved amount of a token to the exchange
+    /// @dev Emits a {Deposit} event
+    /// @param recipient Recipient address
+    /// @param token Token address
+    /// @param earn Whether to earn yield by depositing them into a vault
+    function depositMaxApproved(address recipient, address token, bool earn) external;
+
     /// @notice Deposits tokens into the exchange and then earns yield by depositing them into a vault
     function depositAndEarn(address token, uint128 amount) external;
 

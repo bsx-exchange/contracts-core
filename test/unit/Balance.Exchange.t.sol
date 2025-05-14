@@ -483,6 +483,74 @@ contract BalanceExchangeTest is Test {
         exchange.depositWithAuthorization(address(collateralToken), makeAddr("account"), 100, 0, 0, 0, "");
     }
 
+    function test_depositMaxApproved_succeeds() public {
+        address account = makeAddr("account");
+        uint128 totalAmount;
+        uint8 tokenDecimals = collateralToken.decimals();
+        bool earnYield = false;
+
+        vm.startPrank(account);
+
+        for (uint128 i = 1; i < 5; i++) {
+            uint128 rawAmount = i * 3000;
+            collateralToken.mint(account, rawAmount);
+            collateralToken.approve(address(exchange), rawAmount);
+
+            uint128 amount = uint128(rawAmount.convertTo18D(tokenDecimals));
+            totalAmount += amount;
+            vm.expectEmit(address(exchange));
+            emit IExchange.Deposit(address(collateralToken), account, amount, 0);
+            exchange.depositMaxApproved(account, address(collateralToken), earnYield);
+
+            assertEq(exchange.balanceOf(account, address(collateralToken)), int128(totalAmount));
+            assertEq(spotEngine.getBalance(address(collateralToken), account), int128(totalAmount));
+            assertEq(spotEngine.getTotalBalance(address(collateralToken)), totalAmount);
+            assertEq(collateralToken.balanceOf(address(exchange)), totalAmount.convertFrom18D(tokenDecimals));
+        }
+    }
+
+    function test_depositMaxApproved_earnYield_succeeds() public {
+        address yieldAsset = _setupYieldAsset();
+        // 1 share = 2 tokens
+        collateralToken.mint(yieldAsset, 1);
+
+        address user = makeAddr("user");
+        uint256 amount = 100e18;
+        uint256 mintShares = 50e18;
+        bool earnYield = true;
+
+        vm.startPrank(user);
+        _prepareDeposit(user, uint128(amount));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(address(collateralToken), user, amount, 0);
+
+        vm.expectEmit(address(clearingService));
+        emit IClearingService.SwapAssets(
+            user,
+            0,
+            address(collateralToken),
+            amount,
+            yieldAsset,
+            mintShares,
+            address(0),
+            0,
+            IClearingService.SwapType.EarnYieldAsset,
+            IClearingService.ActionStatus.Success
+        );
+
+        exchange.depositMaxApproved(user, address(collateralToken), earnYield);
+
+        assertEq(spotEngine.getBalance(address(collateralToken), user), 0);
+        assertEq(spotEngine.getBalance(yieldAsset, user), int256(mintShares));
+
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), 0);
+        assertEq(spotEngine.getTotalBalance(yieldAsset), mintShares);
+
+        assertEq(ERC20Simple(yieldAsset).balanceOf(address(clearingService)), mintShares);
+        assertEq(collateralToken.balanceOf(address(exchange)), 0);
+    }
+
     function test_depositAndEarn_succeeds() public {
         address yieldAsset = _setupYieldAsset();
         // 1 share = 2 tokens

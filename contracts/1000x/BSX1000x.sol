@@ -119,20 +119,18 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
     /// @inheritdoc IBSX1000x
     function depositRaw(address account, address token, uint256 rawAmount) public {
-        _assertMainAccount(account);
-
         if (token != address(collateralToken)) {
             revert Errors.Exchange_NotCollateralToken();
         }
-        if (rawAmount == 0) revert ZeroAmount();
-
-        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
 
         uint256 amount = rawAmount.convertToScale(token);
-        uint256 newBalance = _balance[account].available + amount;
-        _balance[account].available = newBalance;
+        deposit(account, amount);
+    }
 
-        emit Deposit(account, amount, newBalance);
+    /// @inheritdoc IBSX1000x
+    function depositMaxApproved(address account, address token) public {
+        uint256 amount = IERC20(token).allowance(account, address(this));
+        depositRaw(account, token, amount);
     }
 
     /// @inheritdoc IBSX1000x
