@@ -149,7 +149,7 @@ contract Exchange is Initializable, ReentrancyGuardUpgradeable, EIP712Upgradeabl
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external nonReentrant {
+    ) external nonReentrant onlyRole(Roles.GENERAL_ROLE) {
         _depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature, false);
     }
 

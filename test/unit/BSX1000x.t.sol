@@ -18,7 +18,6 @@ import {Exchange, IExchange} from "contracts/exchange/Exchange.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
-import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
@@ -225,10 +224,9 @@ contract BSX1000xTest is Test {
         bsx1000x.depositRaw(account, invalidToken, 1000);
     }
 
-    function test_depositWithAuthorization() public {
+    function test_depositWithAuthorization_succeeds() public {
         address account = makeAddr("account");
         uint256 totalAmount;
-        uint8 decimals = collateralToken.decimals();
         uint256 mockValidTime = block.timestamp;
         bytes32 mockNonce = keccak256(abi.encode(account, mockValidTime));
         bytes memory mockSignature = abi.encode(account, mockValidTime, mockNonce);
@@ -236,22 +234,10 @@ contract BSX1000xTest is Test {
         vm.startPrank(account);
         for (uint256 i = 1; i < 5; i++) {
             uint256 amount = i * 1e18;
-            totalAmount += amount;
+            collateralToken.mint(account, amount);
+            collateralToken.approve(address(bsx1000x), amount);
 
-            vm.mockCall(
-                address(collateralToken),
-                abi.encodeWithSelector(
-                    IERC3009Minimal.receiveWithAuthorization.selector,
-                    account,
-                    address(bsx1000x),
-                    amount.convertFrom18D(decimals),
-                    mockValidTime,
-                    mockValidTime,
-                    mockNonce,
-                    mockSignature
-                ),
-                abi.encode()
-            );
+            totalAmount += amount;
 
             vm.expectEmit(address(bsx1000x));
             emit IBSX1000x.Deposit(account, amount, totalAmount);

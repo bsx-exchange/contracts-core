@@ -9,7 +9,6 @@ import {ERC1271} from "../mock/ERC1271.sol";
 import {ERC20MissingReturn} from "../mock/ERC20MissingReturn.sol";
 import {ERC20Simple} from "../mock/ERC20Simple.sol";
 
-import {MockERC4626} from "../mock/MockERC4626.sol";
 import {UniversalSigValidator} from "../mock/UniversalSigValidator.sol";
 import {WETH9Mock} from "../mock/WETH9.sol";
 
@@ -21,11 +20,16 @@ import {Perp} from "contracts/exchange/Perp.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
-import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
-import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR, WETH9} from "contracts/exchange/share/Constants.sol";
+import {
+    NATIVE_ETH,
+    SPARK_USDC_VAULT,
+    UNIVERSAL_SIG_VALIDATOR,
+    USDC_TOKEN,
+    WETH9
+} from "contracts/exchange/share/Constants.sol";
 import {TxStatus} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
@@ -39,7 +43,7 @@ contract BalanceExchangeTest is Test {
 
     address private sequencer = makeAddr("sequencer");
 
-    ERC20Simple private collateralToken = new ERC20Simple(6);
+    ERC20Simple private collateralToken = ERC20Simple(USDC_TOKEN);
 
     Access private access;
     Exchange private exchange;
@@ -65,6 +69,8 @@ contract BalanceExchangeTest is Test {
 
     function setUp() public {
         vm.startPrank(sequencer);
+
+        deployCodeTo("ERC20Simple.sol", abi.encode(6), USDC_TOKEN);
 
         access = new Access();
         stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
@@ -409,7 +415,6 @@ contract BalanceExchangeTest is Test {
     function test_depositWithAuthorization() public {
         address account = makeAddr("account");
         uint128 totalAmount;
-        uint8 tokenDecimals = collateralToken.decimals();
         uint256 mockValidTime = block.timestamp;
         bytes32 mockNonce = keccak256(abi.encode(account, mockValidTime));
         bytes memory mockSignature = abi.encode(account, mockValidTime, mockNonce);
@@ -421,21 +426,6 @@ contract BalanceExchangeTest is Test {
             vm.stopPrank();
 
             totalAmount += amount;
-
-            vm.mockCall(
-                address(collateralToken),
-                abi.encodeWithSelector(
-                    IERC3009Minimal.receiveWithAuthorization.selector,
-                    account,
-                    address(exchange),
-                    amount.convertFrom18D(tokenDecimals),
-                    mockValidTime,
-                    mockValidTime,
-                    mockNonce,
-                    mockSignature
-                ),
-                abi.encode()
-            );
 
             vm.expectEmit(address(exchange));
             emit IExchange.Deposit(address(collateralToken), account, amount, 0);
@@ -469,10 +459,30 @@ contract BalanceExchangeTest is Test {
         exchange.depositWithAuthorization(notSupportedToken, makeAddr("account"), 100, 0, 0, 0, "");
     }
 
+    function test_depositWithAuthorization_revertsIfReceivedAmountMismatch() public {
+        deployCodeTo("WETH9.sol", USDC_TOKEN);
+
+        uint128 wethExchangeBalance = 500 ether;
+        vm.deal(address(exchange), wethExchangeBalance);
+        vm.prank(address(exchange));
+        WETH9Mock(payable(USDC_TOKEN)).deposit{value: wethExchangeBalance}();
+
+        address account = makeAddr("account");
+        uint128 amount = 400 ether;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Errors.Exchange_DepositWithAuthorization_ReceivedAmountMismatch.selector, amount, 0)
+        );
+
+        vm.prank(sequencer);
+        exchange.depositWithAuthorization(USDC_TOKEN, account, amount, 0, 0, 0, bytes(""));
+    }
+
     function test_depositWithAuthorization_revertsIfRecipientIsVault() public {
         address vault = _registerVault();
 
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, vault));
+        vm.prank(sequencer);
         exchange.depositWithAuthorization(address(collateralToken), vault, 100, 0, 0, 0, bytes(""));
     }
 
@@ -681,26 +691,13 @@ contract BalanceExchangeTest is Test {
         uint256 amount = 100e18;
         uint256 mintShares = 50e18;
 
-        collateralToken.mint(address(exchange), uint128(amount).convertFrom18D(collateralToken.decimals()));
-
-        uint8 tokenDecimals = collateralToken.decimals();
         uint256 mockValidTime = block.timestamp;
         bytes32 mockNonce = keccak256(abi.encode(user, mockValidTime));
         bytes memory mockSignature = abi.encode(user, mockValidTime, mockNonce);
-        vm.mockCall(
-            address(collateralToken),
-            abi.encodeWithSelector(
-                IERC3009Minimal.receiveWithAuthorization.selector,
-                user,
-                address(exchange),
-                uint128(amount).convertFrom18D(tokenDecimals),
-                mockValidTime,
-                mockValidTime,
-                mockNonce,
-                mockSignature
-            ),
-            abi.encode()
-        );
+
+        vm.startPrank(user);
+        _prepareDeposit(user, uint128(amount));
+        vm.stopPrank();
 
         vm.expectEmit(address(exchange));
         emit IExchange.Deposit(address(collateralToken), user, amount, 0);
@@ -2075,7 +2072,8 @@ contract BalanceExchangeTest is Test {
     }
 
     function _setupYieldAsset() private returns (address yieldAsset) {
-        yieldAsset = address(new MockERC4626(collateralToken));
+        yieldAsset = SPARK_USDC_VAULT;
+        deployCodeTo("MockERC4626.sol", abi.encode(address(collateralToken)), SPARK_USDC_VAULT);
 
         vm.prank(sequencer);
         clearingService.addYieldAsset(address(collateralToken), yieldAsset);

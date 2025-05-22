@@ -15,7 +15,7 @@ import {IERC3009Minimal} from "../../interfaces/external/IERC3009Minimal.sol";
 import {IWETH9} from "../../interfaces/external/IWETH9.sol";
 import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
-import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR, WETH9} from "../../share/Constants.sol";
+import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR, USDC_TOKEN, WETH9} from "../../share/Constants.sol";
 
 library BalanceLogic {
     using SafeERC20 for IERC20;
@@ -83,13 +83,25 @@ library BalanceLogic {
     ) external {
         _assertMainAccount(accounts, depositor);
 
+        if (token != USDC_TOKEN) {
+            revert Errors.Exchange_TokenNotSupported(token);
+        }
+
         uint256 rawAmount;
         (amount, rawAmount) = amount.roundDownAndConvertFromScale(token);
         if (amount == 0 || rawAmount == 0) revert Errors.Exchange_ZeroAmount();
 
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
         IERC3009Minimal(token).receiveWithAuthorization(
             depositor, address(this), rawAmount, validAfter, validBefore, nonce, signature
         );
+
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 receivedAmount = balanceAfter - balanceBefore;
+        if (receivedAmount != rawAmount) {
+            revert Errors.Exchange_DepositWithAuthorization_ReceivedAmountMismatch(rawAmount, receivedAmount);
+        }
 
         engine.clearingService.deposit(depositor, amount, token);
         emit IExchange.Deposit(token, depositor, amount, 0);

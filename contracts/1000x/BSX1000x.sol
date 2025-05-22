@@ -148,9 +148,17 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
         if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
 
+        uint256 balanceBefore = collateralToken.balanceOf(address(this));
+
         IERC3009Minimal(address(collateralToken)).receiveWithAuthorization(
             account, address(this), rawAmount, validAfter, validBefore, nonce, signature
         );
+
+        uint256 balanceAfter = collateralToken.balanceOf(address(this));
+        uint256 receivedAmount = balanceAfter - balanceBefore;
+        if (receivedAmount != rawAmount) {
+            revert Errors.Exchange_DepositWithAuthorization_ReceivedAmountMismatch(rawAmount, receivedAmount);
+        }
 
         uint256 newBalance = _balance[account].available + roundDownAmount;
         _balance[account].available = newBalance;

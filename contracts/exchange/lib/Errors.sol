@@ -48,6 +48,9 @@ library Errors {
     /// @notice Thrown when msg.value is not equal to deposit amount
     error Exchange_InvalidEthAmount();
 
+    /// @notice Thrown when received amount mismatch expected amount
+    error Exchange_DepositWithAuthorization_ReceivedAmountMismatch(uint256 expectedAmount, uint256 receivedAmount);
+
     /// @notice Thrown when insufficient ETH is sent
     error Exchange_InsufficientEth();
 
