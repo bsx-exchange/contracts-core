@@ -353,39 +353,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
             _hashTypedDataV4(keccak256(abi.encode(CLOSE_POSITION_TYPEHASH, productId, account, nonce)));
         _validateAuthorization(account, closeOrderHash, signature);
 
-        // update position
-        Position storage position = _position[account][nonce];
-        if (position.status != PositionStatus.Open) {
-            revert PositionNotOpening(account, nonce);
-        }
-        if (position.productId != productId) {
-            revert ProductIdMismatch();
-        }
-        bool isLong = position.size > 0;
-        if (isLong && (closePrice < position.liquidationPrice || closePrice > position.takeProfitPrice)) {
-            revert InvalidClosePrice();
-        }
-        if (!isLong && (closePrice > position.liquidationPrice || closePrice < position.takeProfitPrice)) {
-            revert InvalidClosePrice();
-        }
-        position.status = PositionStatus.Closed;
-        position.closePrice = closePrice;
-
-        int256 expectedPnl = position.size.mul18D(closePrice.safeInt128() - position.openPrice.safeInt128());
-        if (pnl > expectedPnl + MARGIN_ERR || pnl < expectedPnl - MARGIN_ERR) {
-            revert InvalidPnl();
-        }
-
-        if (fee > position.margin.safeInt128() || fee > position.margin.safeInt128() + pnl) {
-            revert InvalidOrderFee();
-        }
-
-        // update balance
-        _unlockMargin(account, nonce, position.margin);
-        _unlockFund(productId, position.margin * lockFactor);
-        int256 realizedPnl = _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
-
-        emit ClosePosition(productId, account, nonce, realizedPnl, pnl, fee, ClosePositionReason.Normal);
+        _closePosition(productId, account, nonce, closePrice, pnl, fee, ClosePositionReason.Normal);
     }
 
     /// @inheritdoc IBSX1000x
@@ -397,40 +365,16 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         int256 fee,
         ClosePositionReason reason
     ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) {
-        // update position
-        Position storage position = _position[account][nonce];
-        if (position.status != PositionStatus.Open) {
-            revert PositionNotOpening(account, nonce);
-        }
-        if (position.productId != productId) {
-            revert ProductIdMismatch();
-        }
-
+        uint128 closePrice;
         if (reason == ClosePositionReason.Liquidation) {
-            position.status = PositionStatus.Liquidated;
-            position.closePrice = position.liquidationPrice;
+            closePrice = _position[account][nonce].liquidationPrice;
         } else if (reason == ClosePositionReason.TakeProfit) {
-            position.status = PositionStatus.TakeProfit;
-            position.closePrice = position.takeProfitPrice;
+            closePrice = _position[account][nonce].takeProfitPrice;
         } else {
             revert InvalidClosePositionReason();
         }
 
-        int256 expectedPnl = position.size.mul18D(position.closePrice.safeInt128() - position.openPrice.safeInt128());
-        if (pnl > expectedPnl + MARGIN_ERR || pnl < expectedPnl - MARGIN_ERR) {
-            revert InvalidPnl();
-        }
-
-        if (fee > position.margin.safeInt128() || fee > position.margin.safeInt128() + pnl) {
-            revert InvalidOrderFee();
-        }
-
-        // update balance
-        _unlockMargin(account, nonce, position.margin);
-        _unlockFund(productId, position.margin * lockFactor);
-        int256 realizedPnl = _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
-
-        emit ClosePosition(productId, account, nonce, realizedPnl, pnl, fee, reason);
+        _closePosition(productId, account, nonce, closePrice, pnl, fee, reason);
     }
 
     /// @inheritdoc IBSX1000x
@@ -542,6 +486,67 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     function _assertMainAccount(address account) internal view {
         if (access.getExchange().getAccountType(account) != IExchange.AccountType.Main) {
             revert Errors.Exchange_InvalidAccountType(account);
+        }
+    }
+
+    function _closePosition(
+        uint32 productId,
+        address account,
+        uint256 nonce,
+        uint128 closePrice,
+        int256 pnl,
+        int256 fee,
+        ClosePositionReason reason
+    ) internal {
+        // update position
+        Position storage position = _position[account][nonce];
+        if (position.status != PositionStatus.Open) {
+            revert PositionNotOpening(account, nonce);
+        }
+        if (position.productId != productId) {
+            revert ProductIdMismatch();
+        }
+
+        if (reason == ClosePositionReason.Normal) {
+            _validateClosePrice(position, closePrice);
+            position.status = PositionStatus.Closed;
+        } else if (reason == ClosePositionReason.Liquidation) {
+            position.status = PositionStatus.Liquidated;
+        } else if (reason == ClosePositionReason.TakeProfit) {
+            position.status = PositionStatus.TakeProfit;
+        } else {
+            revert InvalidClosePositionReason();
+        }
+
+        position.closePrice = closePrice;
+
+        int256 expectedPnl = position.size.mul18D(closePrice.safeInt128() - position.openPrice.safeInt128());
+        if (pnl > expectedPnl + MARGIN_ERR || pnl < expectedPnl - MARGIN_ERR) {
+            revert InvalidPnl();
+        }
+
+        if (pnl < 0 && fee > position.margin.safeInt128()) {
+            revert InvalidOrderFee();
+        }
+        if (pnl > 0 && fee > pnl) {
+            revert InvalidOrderFee();
+        }
+
+        // update balance
+        _unlockMargin(account, nonce, position.margin);
+        _unlockFund(productId, position.margin * lockFactor);
+        int256 realizedPnl = _updateBalanceAfterClosingPosition(productId, account, nonce, pnl, fee);
+
+        emit ClosePosition(productId, account, nonce, realizedPnl, pnl, fee, reason);
+    }
+
+    function _validateClosePrice(Position storage position, uint128 closePrice) internal view {
+        bool isLong = position.size > 0;
+        if (isLong && (closePrice < position.liquidationPrice || closePrice > position.takeProfitPrice)) {
+            revert InvalidClosePrice();
+        }
+        if (!isLong && (closePrice > position.liquidationPrice || closePrice < position.takeProfitPrice)) {
+            revert InvalidClosePrice();
         }
     }
 

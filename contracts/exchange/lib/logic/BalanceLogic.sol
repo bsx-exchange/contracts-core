@@ -34,9 +34,20 @@ library BalanceLogic {
         keccak256("Transfer(address from,address to,address token,uint256 amount,uint256 nonce)");
     bytes32 public constant WITHDRAW_TYPEHASH =
         keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
+    bytes32 public constant SET_NATIVE_YIELD_TYPEHASH =
+        keccak256("SetNativeYield(address account,bool enabled,string message,uint256 nonce)");
 
     /// @notice Deposits token to spot account
-    function deposit(BalanceEngine calldata engine, address recipient, address token, uint256 amount) external {
+    function deposit(
+        mapping(address => IExchange.Account) storage accounts,
+        BalanceEngine calldata engine,
+        address recipient,
+        address token,
+        uint256 amount,
+        bool earn
+    ) external {
+        _assertMainAccount(accounts, recipient);
+
         if (amount == 0) revert Errors.Exchange_ZeroAmount();
 
         if (token == NATIVE_ETH) {
@@ -44,19 +55,24 @@ library BalanceLogic {
             if (msg.value != amount) revert Errors.Exchange_InvalidEthAmount();
             IWETH9(token).deposit{value: amount}();
         } else {
-            (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
-            if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
+            (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(token);
+            if (roundDownAmount == 0 || rawAmount == 0) revert Errors.Exchange_ZeroAmount();
             amount = roundDownAmount.safeUInt128();
-            IERC20(token).safeTransferFrom(msg.sender, address(this), amountToTransfer);
+            IERC20(token).safeTransferFrom(msg.sender, address(this), rawAmount);
         }
 
         engine.clearingService.deposit(recipient, amount, token);
         emit IExchange.Deposit(token, recipient, amount, 0);
+
+        if (earn) {
+            _earnYield(engine, recipient, token, amount);
+        }
     }
 
     /// @notice Deposits collateral token with authorization
     /// @dev Supports only tokens compliant with the ERC-3009 standard.
     function depositWithAuthorization(
+        mapping(address => IExchange.Account) storage accounts,
         BalanceEngine calldata engine,
         address depositor,
         address token,
@@ -64,17 +80,38 @@ library BalanceLogic {
         uint256 validAfter,
         uint256 validBefore,
         bytes32 nonce,
-        bytes calldata signature
+        bytes calldata signature,
+        bool earn
     ) external {
-        (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
-        if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
+        _assertMainAccount(accounts, depositor);
+
+        uint256 rawAmount;
+        (amount, rawAmount) = amount.roundDownAndConvertFromScale(token);
+        if (amount == 0 || rawAmount == 0) revert Errors.Exchange_ZeroAmount();
 
         IERC3009Minimal(token).receiveWithAuthorization(
-            depositor, address(this), amountToTransfer, validAfter, validBefore, nonce, signature
+            depositor, address(this), rawAmount, validAfter, validBefore, nonce, signature
         );
 
-        engine.clearingService.deposit(depositor, roundDownAmount, token);
-        emit IExchange.Deposit(token, depositor, roundDownAmount, 0);
+        engine.clearingService.deposit(depositor, amount, token);
+        emit IExchange.Deposit(token, depositor, amount, 0);
+
+        if (earn) {
+            _earnYield(engine, depositor, token, amount);
+        }
+    }
+
+    function _earnYield(BalanceEngine calldata engine, address recipient, address token, uint256 amount) private {
+        int256 currentBalance = engine.spot.getBalance(token, recipient);
+        if (currentBalance < 0) {
+            return;
+        }
+
+        if (currentBalance > amount.safeInt256()) {
+            engine.clearingService.earnYieldAsset(recipient, token, amount);
+        } else {
+            engine.clearingService.earnYieldAsset(recipient, token, currentBalance.safeUInt256());
+        }
     }
 
     /// @notice Withdraws collateral token
@@ -141,11 +178,6 @@ library BalanceLogic {
         address to = params.to;
         uint256 nonce = params.nonce;
         int256 amount = params.amount.safeInt256();
-
-        IClearingService.VaultShare memory vaultShare = engine.clearingService.getVaultShare(from, token);
-        if (vaultShare.shares > 0) {
-            revert Errors.Exchange_Transfer_YieldAsset(token);
-        }
 
         bool isValid = _validateTransfer(accounts, from, to);
         if (!isValid) {

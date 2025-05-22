@@ -114,7 +114,4 @@ interface IClearingService {
 
     /// @notice Gets a yield asset of a collateral token
     function yieldAssets(address token) external view returns (address);
-
-    /// @notice Gets vault share of an account
-    function getVaultShare(address account, address token) external view returns (VaultShare memory);
 }

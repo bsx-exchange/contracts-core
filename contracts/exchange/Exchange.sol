@@ -83,13 +83,6 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         _;
     }
 
-    modifier notSubaccount(address account) {
-        if (_accounts[account].accountType == AccountType.Subaccount) {
-            revert Errors.Exchange_Subaccount();
-        }
-        _;
-    }
-
     receive() external payable {}
 
     /// @inheritdoc IExchange
@@ -420,13 +413,10 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         internal
         enabledDeposit
         supportedToken(token)
-        notVault(recipient)
-        notSubaccount(recipient)
     {
-        BalanceLogic.deposit(BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount);
-        if (earn) {
-            clearingService.earnYieldAsset(recipient, token, amount);
-        }
+        BalanceLogic.deposit(
+            _accounts, BalanceLogic.BalanceEngine(clearingService, spotEngine), recipient, token, amount, earn
+        );
     }
 
     /// @dev Internal function to deposit tokens into the exchange with authorization
@@ -439,8 +429,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         bytes32 nonce,
         bytes calldata signature,
         bool earn
-    ) internal enabledDeposit supportedToken(token) notVault(depositor) notSubaccount(depositor) {
+    ) internal enabledDeposit supportedToken(token) {
         BalanceLogic.depositWithAuthorization(
+            _accounts,
             BalanceLogic.BalanceEngine(clearingService, spotEngine),
             depositor,
             token,
@@ -448,11 +439,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             validAfter,
             validBefore,
             nonce,
-            signature
+            signature,
+            earn
         );
-        if (earn) {
-            clearingService.earnYieldAsset(depositor, token, amount);
-        }
     }
 
     /// @dev Handles a operation. Will revert if operation type is invalid.

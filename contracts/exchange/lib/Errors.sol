@@ -112,6 +112,9 @@ library Errors {
     /// @notice Thrown when adding signing wallet with used nonce
     error Exchange_AddSigningWallet_UsedNonce(address account, uint64 nonce);
 
+    /// @notice Thrown when setting native yield with used nonce
+    error Exchange_SetNativeYield_NonceUsed(address account, uint256 nonce);
+
     /// @notice Thrown when withdrawing with used nonce
     error Exchange_Withdraw_NonceUsed(address account, uint64 nonce);
 
@@ -120,9 +123,6 @@ library Errors {
 
     /// @notice Throw when transferring between from and to doesn't permit
     error Exchange_Transfer_NotAllowed(address from, address to);
-
-    /// @notice Thrown when transferring yield asset to another account
-    error Exchange_Transfer_YieldAsset(address token);
 
     /// @notice Thrown when transferring to BSX1000 with used nonce
     error Exchange_TransferToBSX1000_NonceUsed(address account, uint256 nonce);
@@ -181,9 +181,6 @@ library Errors {
 
     /// @notice Thrown when swap amount exceeds the maximum amount
     error Exchange_Swap_AmountOutTooLittle(uint256 amountOutX18, uint256 minAmountOutX18);
-
-    /// @notice Thrown when the action does not support subaccount
-    error Exchange_Subaccount();
 
     /// @notice Thrown when subaccount is deleted
     error Exchange_Subaccount_Deleted(address subaccount);

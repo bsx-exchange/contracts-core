@@ -136,6 +136,26 @@ contract BSX1000xTest is Test {
         }
     }
 
+    function test_deposit_revertsIfNotMainAccount() public {
+        address account = makeAddr("account");
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, account),
+            abi.encode(IExchange.AccountType.Subaccount)
+        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, account));
+        bsx1000x.deposit(account, 1);
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, account),
+            abi.encode(IExchange.AccountType.Vault)
+        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, account));
+        bsx1000x.deposit(account, 1);
+    }
+
     function test_deposit_revertsIfZeroAmount() public {
         address account = makeAddr("account");
         vm.expectRevert(IBSX1000x.ZeroAmount.selector);
@@ -170,6 +190,26 @@ contract BSX1000xTest is Test {
             assertEq(balance.locked, 0);
             assertEq(collateralToken.balanceOf(address(bsx1000x)), totalAmount.convertFrom18D(tokenDecimals));
         }
+    }
+
+    function test_depositRaw_revertsIfNotMainAccount() public {
+        address account = makeAddr("account");
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, account),
+            abi.encode(IExchange.AccountType.Subaccount)
+        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, account));
+        bsx1000x.depositRaw(account, address(collateralToken), 1);
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, account),
+            abi.encode(IExchange.AccountType.Vault)
+        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, account));
+        bsx1000x.depositRaw(account, address(collateralToken), 1);
     }
 
     function test_depositRaw_revertsIfZeroAmount() public {
@@ -221,6 +261,26 @@ contract BSX1000xTest is Test {
             assertEq(balance.available, totalAmount);
             assertEq(balance.locked, 0);
         }
+    }
+
+    function test_depositWithAuthorization_revertsIfNotMainAccount() public {
+        address account = makeAddr("account");
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, account),
+            abi.encode(IExchange.AccountType.Subaccount)
+        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, account));
+        bsx1000x.depositWithAuthorization(account, 0, 0, 0, 0, "");
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, account),
+            abi.encode(IExchange.AccountType.Vault)
+        );
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, account));
+        bsx1000x.depositWithAuthorization(account, 0, 0, 0, 0, "");
     }
 
     function test_depositWithAuthorization_revertsIfZeroAmount() public {
@@ -1067,6 +1127,29 @@ contract BSX1000xTest is Test {
         assertEq(position.takeProfitPrice, order.takeProfitPrice);
         assertEq(position.liquidationPrice, order.liquidationPrice);
         assertEq(uint8(position.status), uint8(IBSX1000x.PositionStatus.Open));
+    }
+
+    function test_openPosition_revertsIfNotMainAccount() public {
+        BSX1000x.Order memory order;
+        bytes memory signature;
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, order.account),
+            abi.encode(IExchange.AccountType.Subaccount)
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, order.account));
+        bsx1000x.openPosition(order, signature);
+
+        vm.mockCall(
+            address(exchange),
+            abi.encodeWithSelector(IExchange.getAccountType.selector, order.account),
+            abi.encode(IExchange.AccountType.Vault)
+        );
+
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, order.account));
+        bsx1000x.openPosition(order, signature);
     }
 
     function test_openPosition_revertsIfUnauthorizedCaller() public {
@@ -2100,9 +2183,9 @@ contract BSX1000xTest is Test {
         );
         bsx1000x.openPosition(order, openSignature);
 
-        // fee is greater than margin
+        // pnl > 0, fee > pnl
         uint128 closePrice = 10_020 * 1e18;
-        int256 closePositionFee = 10 * 1e18 + 1;
+        int256 closePositionFee = 20 * 1e18 + 1;
         int256 pnl = 20 * 1e18;
         bytes memory closeSignature = _signCloseOrder(signerKey, order);
         vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InvalidOrderFee.selector));
@@ -2110,11 +2193,10 @@ contract BSX1000xTest is Test {
             order.productId, order.account, order.nonce, closePrice, pnl, closePositionFee, closeSignature
         );
 
-        // fee + |loss| is greater than margin
-        // margin = 10, loss = 7, fee = 4
-        closePrice = 9993 * 1e18;
-        closePositionFee = 4 * 1e18;
-        pnl = -7 * 1e18;
+        // pnl < 0, fee > margin
+        closePrice = 9995 * 1e18;
+        closePositionFee = 10 * 1e18 + 1;
+        pnl = -5 * 1e18;
         closeSignature = _signCloseOrder(signerKey, order);
         vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InvalidOrderFee.selector));
         bsx1000x.closePosition(
@@ -2920,17 +3002,16 @@ contract BSX1000xTest is Test {
         );
         bsx1000x.openPosition(order, openSignature);
 
-        // fee is greater than margin
-        int256 closePositionFee = 10 * 1e18 + 1;
+        // pnl > 0, fee > pnl
+        int256 closePositionFee = 5 * 1e18 + 1;
         int256 pnl = 5 * 1e18;
         vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InvalidOrderFee.selector));
         bsx1000x.forceClosePosition(
             order.productId, order.account, order.nonce, pnl, closePositionFee, IBSX1000x.ClosePositionReason.TakeProfit
         );
 
-        // fee + |loss| is greater than margin
-        // margin = 10, loss = 5, fee = 6
-        closePositionFee = 6 * 1e18;
+        // pnl < 0, fee > margin
+        closePositionFee = 10 * 1e18 + 1;
         pnl = -5 * 1e18;
         vm.expectRevert(abi.encodeWithSelector(IBSX1000x.InvalidOrderFee.selector));
         bsx1000x.forceClosePosition(

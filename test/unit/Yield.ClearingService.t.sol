@@ -469,7 +469,7 @@ contract YieldClearingServiceTest is Test {
         clearingService.liquidateYieldAssetIfNecessary(user, token);
     }
 
-    function test_innerswapYieldAssetPermit_revertsIfCallerNotClearingService() public {
+    function test_innerSwapYieldAssetPermit_revertsIfCallerNotClearingService() public {
         address account;
         address assetIn;
         uint256 amountIn;

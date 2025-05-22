@@ -153,6 +153,8 @@ contract OrderbookTest is Test {
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(-expectedBaseAmount, expectedQuoteAmount, 0))
         );
+        assertEq(perpEngine.openPositions(maker), 1);
+        assertEq(perpEngine.openPositions(taker), 1);
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
 
@@ -200,6 +202,8 @@ contract OrderbookTest is Test {
             abi.encode(perpEngine.getOpenPosition(taker, productId)),
             abi.encode(IPerp.Balance(expectedBaseAmount, -expectedQuoteAmount, 0))
         );
+        assertEq(perpEngine.openPositions(maker), 1);
+        assertEq(perpEngine.openPositions(taker), 1);
         assertEq(spotEngine.getBalance(token, maker), 0);
         assertEq(spotEngine.getBalance(token, taker), 0);
 
@@ -223,6 +227,9 @@ contract OrderbookTest is Test {
         IOrderBook.Order memory takerOrder = _createShortOrder(taker, size, openPositionPrice, takerNonce);
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
+        assertEq(perpEngine.openPositions(maker), 1);
+        assertEq(perpEngine.openPositions(taker), 1);
+
         uint128 closePositionPrice = 80_000 * 1e18;
         makerOrder = _createShortOrder(maker, size, closePositionPrice, makerNonce + 1);
         takerOrder = _createLongOrder(taker, size, closePositionPrice, takerNonce + 1);
@@ -230,6 +237,8 @@ contract OrderbookTest is Test {
 
         assertEq(abi.encode(perpEngine.getOpenPosition(maker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
         assertEq(abi.encode(perpEngine.getOpenPosition(taker, productId)), abi.encode(IPerp.Balance(0, 0, 0)));
+        assertEq(perpEngine.openPositions(maker), 0);
+        assertEq(perpEngine.openPositions(taker), 0);
 
         int128 pnl = int128(size).mul18D(int128(closePositionPrice - openPositionPrice));
         assertEq(spotEngine.getBalance(token, maker), pnl);
@@ -250,10 +259,16 @@ contract OrderbookTest is Test {
         IOrderBook.Order memory takerOrder = _createShortOrder(taker, openSize, price, takerNonce);
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
 
+        assertEq(perpEngine.openPositions(maker), 1);
+        assertEq(perpEngine.openPositions(taker), 1);
+
         uint128 closeSize = 2 * 1e18;
         makerOrder = _createShortOrder(maker, closeSize, price, makerNonce + 1);
         takerOrder = _createLongOrder(taker, closeSize, price, takerNonce + 1);
         orderbook.matchOrders(productId, makerOrder, takerOrder, fees, isLiquidation);
+
+        assertEq(perpEngine.openPositions(maker), 1);
+        assertEq(perpEngine.openPositions(taker), 1);
 
         int128 expectedBaseAmount = int128(openSize - closeSize);
         int128 expectedQuoteAmount = expectedBaseAmount.mul18D(int128(price));

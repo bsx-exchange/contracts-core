@@ -18,7 +18,14 @@ import {ISwap} from "./interfaces/ISwap.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
 import {Roles} from "./lib/Roles.sol";
-import {BSX_TOKEN, PRICE_SCALE, UNIVERSAL_SIG_VALIDATOR, USDC_TOKEN, ZERO_NONCE} from "./share/Constants.sol";
+import {
+    BSX_TOKEN,
+    PRICE_SCALE,
+    SPARK_USDC_VAULT,
+    UNIVERSAL_SIG_VALIDATOR,
+    USDC_TOKEN,
+    ZERO_NONCE
+} from "./share/Constants.sol";
 
 /// @title Clearinghouse contract
 /// @notice Manage insurance fund and spot balance
@@ -124,6 +131,8 @@ contract ClearingService is IClearingService, Initializable {
         address assetOut = params.assetOut;
         uint256 minAmountOut = params.minAmountOut;
         uint256 nonce = params.nonce;
+
+        _assertMainAccount(account);
 
         SwapType swapType;
         if (yieldAssets[assetIn] == assetOut) {
@@ -341,11 +350,6 @@ contract ClearingService is IClearingService, Initializable {
         return _insuranceFund;
     }
 
-    /// @inheritdoc IClearingService
-    function getVaultShare(address account, address token) external view returns (VaultShare memory) {
-        return vaultShares[account][token];
-    }
-
     /// @dev Assert that the account is a main account
     function _assertMainAccount(address account) internal view {
         if (access.getExchange().getAccountType(account) != IExchange.AccountType.Main) {
@@ -383,6 +387,10 @@ contract ClearingService is IClearingService, Initializable {
             revert Errors.ClearingService_YieldAsset_AssetMismatch(token, vault);
         }
         address tokenOut;
+
+        if (token == USDC_TOKEN) {
+            vault = SPARK_USDC_VAULT;
+        }
 
         uint256 balanceBefore;
         address receiver;

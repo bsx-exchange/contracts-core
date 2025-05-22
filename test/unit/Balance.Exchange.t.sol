@@ -229,7 +229,7 @@ contract BalanceExchangeTest is Test {
     function test_deposit_revertsIfRecipientIsVault() public {
         address vault = _registerVault();
 
-        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, vault));
         exchange.deposit(vault, address(collateralToken), 100);
     }
 
@@ -471,7 +471,7 @@ contract BalanceExchangeTest is Test {
     function test_depositWithAuthorization_revertsIfRecipientIsVault() public {
         address vault = _registerVault();
 
-        vm.expectRevert(Errors.Exchange_VaultAddress.selector);
+        vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_InvalidAccountType.selector, vault));
         exchange.depositWithAuthorization(address(collateralToken), vault, 100, 0, 0, 0, bytes(""));
     }
 
@@ -590,6 +590,85 @@ contract BalanceExchangeTest is Test {
 
         assertEq(ERC20Simple(yieldAsset).balanceOf(address(clearingService)), mintShares);
         assertEq(collateralToken.balanceOf(address(exchange)), 0);
+    }
+
+    function test_depositAndEarn_skipsIfAmountNotEnoughToCoverLoss() public {
+        address yieldAsset = _setupYieldAsset();
+
+        address user = makeAddr("user");
+        uint256 amount = 100e18;
+
+        // 1 share = 1 tokens
+        uint256 loss = 110e18;
+        vm.prank(address(clearingService));
+        // this function does not change total balance, total_balance is 0
+        spotEngine.updateBalance(user, address(collateralToken), -int256(loss));
+
+        vm.startPrank(user);
+        _prepareDeposit(user, uint128(amount));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(address(collateralToken), user, amount, 0);
+
+        exchange.depositAndEarn(address(collateralToken), uint128(amount));
+
+        assertEq(spotEngine.getBalance(address(collateralToken), user), -10e18);
+        assertEq(spotEngine.getBalance(yieldAsset, user), 0);
+
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), amount);
+        assertEq(spotEngine.getTotalBalance(yieldAsset), 0);
+
+        assertEq(ERC20Simple(yieldAsset).balanceOf(address(clearingService)), 0);
+        assertEq(
+            collateralToken.balanceOf(address(exchange)), uint128(amount).convertFrom18D(collateralToken.decimals())
+        );
+    }
+
+    function test_depositAndEarn_earnsOnlyNetAmountWhenAccountLoss() public {
+        address yieldAsset = _setupYieldAsset();
+        // 1 share = 2 tokens
+        collateralToken.mint(yieldAsset, 1);
+
+        address user = makeAddr("user");
+        uint256 amount = 100e18;
+
+        uint256 loss = 20e18;
+        vm.prank(address(clearingService));
+        // this function does not change total balance, total_balance is 0
+        spotEngine.updateBalance(user, address(collateralToken), -int256(loss));
+
+        uint256 mintShares = 40e18;
+
+        vm.startPrank(user);
+        _prepareDeposit(user, uint128(amount));
+
+        vm.expectEmit(address(exchange));
+        emit IExchange.Deposit(address(collateralToken), user, amount, 0);
+
+        vm.expectEmit(address(clearingService));
+        emit IClearingService.SwapAssets(
+            user,
+            0,
+            address(collateralToken),
+            amount - loss,
+            yieldAsset,
+            mintShares,
+            address(0),
+            0,
+            IClearingService.SwapType.EarnYieldAsset,
+            IClearingService.ActionStatus.Success
+        );
+
+        exchange.depositAndEarn(address(collateralToken), uint128(amount));
+
+        assertEq(spotEngine.getBalance(address(collateralToken), user), 0);
+        assertEq(spotEngine.getBalance(yieldAsset, user), int256(mintShares));
+
+        assertEq(spotEngine.getTotalBalance(address(collateralToken)), loss);
+        assertEq(spotEngine.getTotalBalance(yieldAsset), mintShares);
+
+        assertEq(ERC20Simple(yieldAsset).balanceOf(address(clearingService)), mintShares);
+        assertEq(collateralToken.balanceOf(address(exchange)), uint128(loss).convertFrom18D(collateralToken.decimals()));
     }
 
     function test_depositAndEarnWithAuthorization_succeeds() public {
