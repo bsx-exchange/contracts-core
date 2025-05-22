@@ -6,6 +6,7 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 
 contract AccessTest is Test {
     using stdStorage for StdStorage;
@@ -14,30 +15,28 @@ contract AccessTest is Test {
     address private account = makeAddr("account");
     Access private access;
 
-    bytes32 private constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
-
     function setUp() public {
         access = new Access();
 
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(admin)
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(admin)
             .checked_write(true);
     }
 
     function test_grantRole() public {
         vm.startPrank(admin);
 
-        access.grantRole(access.ADMIN_ROLE(), account);
-        assertEq(access.hasRole(access.ADMIN_ROLE(), account), true);
+        access.grantRole(Roles.ADMIN_ROLE, account);
+        assertEq(access.hasRole(Roles.ADMIN_ROLE, account), true);
 
-        access.grantRole(access.BATCH_OPERATOR_ROLE(), account);
-        assertEq(access.hasRole(access.BATCH_OPERATOR_ROLE(), account), true);
+        access.grantRole(Roles.BATCH_OPERATOR_ROLE, account);
+        assertEq(access.hasRole(Roles.BATCH_OPERATOR_ROLE, account), true);
 
-        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), account);
-        assertEq(access.hasRole(access.COLLATERAL_OPERATOR_ROLE(), account), true);
+        access.grantRole(Roles.COLLATERAL_OPERATOR_ROLE, account);
+        assertEq(access.hasRole(Roles.COLLATERAL_OPERATOR_ROLE, account), true);
     }
 
     function test_grantRole_revertsIfNotAdmin() public {
-        bytes32 role = access.BATCH_OPERATOR_ROLE();
+        bytes32 role = Roles.BATCH_OPERATOR_ROLE;
         address malicious = makeAddr("malicious");
 
         vm.prank(admin);
@@ -45,12 +44,14 @@ contract AccessTest is Test {
 
         vm.prank(account);
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, account, ADMIN_ROLE)
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, account, Roles.ADMIN_ROLE)
         );
         access.grantRole(role, malicious);
 
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.grantRole(keccak256("role"), account);
     }
@@ -58,17 +59,19 @@ contract AccessTest is Test {
     function test_revokeRoleForAccount() public {
         vm.startPrank(admin);
 
-        access.grantRole(access.ADMIN_ROLE(), account);
-        assertEq(access.hasRole(access.ADMIN_ROLE(), account), true);
+        access.grantRole(Roles.ADMIN_ROLE, account);
+        assertEq(access.hasRole(Roles.ADMIN_ROLE, account), true);
 
-        access.revokeRole(access.ADMIN_ROLE(), account);
-        assertEq(access.hasRole(access.ADMIN_ROLE(), account), false);
+        access.revokeRole(Roles.ADMIN_ROLE, account);
+        assertEq(access.hasRole(Roles.ADMIN_ROLE, account), false);
     }
 
     function test_revokeRoleForAccount_revertsIfNotAdmin() public {
-        bytes32 role = access.BATCH_OPERATOR_ROLE();
+        bytes32 role = Roles.BATCH_OPERATOR_ROLE;
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.revokeRole(role, account);
     }
@@ -90,7 +93,9 @@ contract AccessTest is Test {
 
     function test_setExchange_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setExchange(makeAddr("exchange"));
     }
@@ -112,7 +117,9 @@ contract AccessTest is Test {
 
     function test_setClearingService_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setClearingService(makeAddr("clearingService"));
     }
@@ -134,7 +141,9 @@ contract AccessTest is Test {
 
     function test_setOrderBook_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setOrderBook(makeAddr("orderBook"));
     }
@@ -156,7 +165,9 @@ contract AccessTest is Test {
 
     function test_setSpotEngine_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setSpotEngine(makeAddr("spotEngine"));
     }
@@ -178,7 +189,9 @@ contract AccessTest is Test {
 
     function test_setPerpEngine_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setPerpEngine(makeAddr("perpEngine"));
     }
@@ -200,7 +213,9 @@ contract AccessTest is Test {
 
     function test_setBsx1000_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setBsx1000(makeAddr("bsx1000"));
     }
@@ -222,7 +237,9 @@ contract AccessTest is Test {
 
     function test_setVaultManager_revertsIfNotAdmin() public {
         vm.expectRevert(
-            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), ADMIN_ROLE)
+            abi.encodeWithSelector(
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.ADMIN_ROLE
+            )
         );
         access.setVaultManager(makeAddr("vaultManager"));
     }
@@ -230,19 +247,19 @@ contract AccessTest is Test {
     function test_getAccountsForRole() public {
         vm.startPrank(admin);
 
-        address[] memory accounts = access.getAccountsForRole(access.BATCH_OPERATOR_ROLE());
+        address[] memory accounts = access.getAccountsForRole(Roles.BATCH_OPERATOR_ROLE);
         assertEq(accounts.length, 0);
 
         for (uint256 i = 0; i < 5; i++) {
             address addr = makeAddr(string(abi.encode(i)));
-            access.grantRole(access.BATCH_OPERATOR_ROLE(), addr);
+            access.grantRole(Roles.BATCH_OPERATOR_ROLE, addr);
         }
 
-        accounts = access.getAccountsForRole(access.BATCH_OPERATOR_ROLE());
+        accounts = access.getAccountsForRole(Roles.BATCH_OPERATOR_ROLE);
         assertEq(accounts.length, 5);
         for (uint256 i = 0; i < 5; i++) {
             assertEq(accounts[i], makeAddr(string(abi.encode(i))));
-            assertEq(access.hasRole(access.BATCH_OPERATOR_ROLE(), accounts[i]), true);
+            assertEq(access.hasRole(Roles.BATCH_OPERATOR_ROLE, accounts[i]), true);
         }
     }
 }

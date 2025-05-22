@@ -16,6 +16,7 @@ import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {BSX_TOKEN, UNIVERSAL_SIG_VALIDATOR, USDC_TOKEN} from "contracts/exchange/share/Constants.sol";
 
 // solhint-disable max-states-count
@@ -57,9 +58,8 @@ contract ExchangeTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
         access.grantRole(GENERAL_ROLE, sequencer);
         access.grantRole(BATCH_OPERATOR_ROLE, sequencer);
         access.grantRole(SIGNER_OPERATOR_ROLE, sequencer);
@@ -148,7 +148,7 @@ contract ExchangeTest is Test {
 
     function test_createSubaccount_revertsIfUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
         bytes memory signature;
 
         vm.expectRevert(

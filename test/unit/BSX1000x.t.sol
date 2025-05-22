@@ -20,6 +20,7 @@ import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 
 contract BSX1000xTest is Test {
@@ -42,11 +43,11 @@ contract BSX1000xTest is Test {
 
     function setUp() public {
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(
             address(this)
         ).checked_write(true);
-        access.grantRole(access.BSX1000_OPERATOR_ROLE(), address(this));
-        access.grantRole(access.GENERAL_ROLE(), address(this));
+        access.grantRole(Roles.BSX1000_OPERATOR_ROLE, address(this));
+        access.grantRole(Roles.GENERAL_ROLE, address(this));
 
         access.setExchange(address(new Exchange()));
 
@@ -363,7 +364,7 @@ contract BSX1000xTest is Test {
         bytes memory signature = abi.encodePacked("signature");
 
         address malicious = makeAddr("malicious");
-        bytes32 role = access.BSX1000_OPERATOR_ROLE();
+        bytes32 role = Roles.BSX1000_OPERATOR_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -566,7 +567,7 @@ contract BSX1000xTest is Test {
         bytes memory signature = abi.encodePacked("signature");
 
         address malicious = makeAddr("malicious");
-        bytes32 role = access.BSX1000_OPERATOR_ROLE();
+        bytes32 role = Roles.BSX1000_OPERATOR_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -735,7 +736,7 @@ contract BSX1000xTest is Test {
 
     function test_withdrawFund_revertsIfUnauthorizedCaller() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -787,7 +788,7 @@ contract BSX1000xTest is Test {
 
     function test_openIsolatedFund_revertsIfUnauthorizedCaller() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -824,7 +825,7 @@ contract BSX1000xTest is Test {
 
     function test_closeIsolatedFund_revertsIfUnauthorizedCaller() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -1072,7 +1073,7 @@ contract BSX1000xTest is Test {
         BSX1000x.Order memory order;
         bytes memory signature;
         address malicious = makeAddr("malicious");
-        bytes32 role = access.BSX1000_OPERATOR_ROLE();
+        bytes32 role = Roles.BSX1000_OPERATOR_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -1874,7 +1875,7 @@ contract BSX1000xTest is Test {
         bytes memory signature;
 
         address malicious = makeAddr("malicious");
-        bytes32 role = access.BSX1000_OPERATOR_ROLE();
+        bytes32 role = Roles.BSX1000_OPERATOR_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -2719,7 +2720,7 @@ contract BSX1000xTest is Test {
         int256 fee;
 
         address malicious = makeAddr("malicious");
-        bytes32 role = access.BSX1000_OPERATOR_ROLE();
+        bytes32 role = Roles.BSX1000_OPERATOR_ROLE;
         vm.prank(malicious);
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)

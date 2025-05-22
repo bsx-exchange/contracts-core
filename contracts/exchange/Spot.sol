@@ -8,6 +8,7 @@ import {SignedMath} from "@openzeppelin/contracts/utils/math/SignedMath.sol";
 import {Access} from "./access/Access.sol";
 import {ISpot} from "./interfaces/ISpot.sol";
 import {Errors} from "./lib/Errors.sol";
+import {Roles} from "./lib/Roles.sol";
 import {BSX_ORACLE} from "./share/Constants.sol";
 
 /// @title Spot contract
@@ -79,7 +80,7 @@ contract Spot is ISpot, Initializable {
     }
 
     /// @inheritdoc ISpot
-    function setCapInUsd(address token, uint256 cap) external onlyRole(access.GENERAL_ROLE()) {
+    function setCapInUsd(address token, uint256 cap) external onlyRole(Roles.GENERAL_ROLE) {
         capInUsd[token] = cap;
     }
 

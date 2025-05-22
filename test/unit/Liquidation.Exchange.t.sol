@@ -15,6 +15,7 @@ import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {ILiquidation} from "contracts/exchange/interfaces/ILiquidation.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {USDC_TOKEN} from "contracts/exchange/share/Constants.sol";
 
 contract LiquidationExchangeTest is Test {
@@ -39,10 +40,10 @@ contract LiquidationExchangeTest is Test {
         deployCodeTo("ERC20Simple.sol", abi.encode(6), USDC_TOKEN);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(admin)
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(admin)
             .checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), admin);
-        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), liquidator);
+        access.grantRole(Roles.GENERAL_ROLE, admin);
+        access.grantRole(Roles.COLLATERAL_OPERATOR_ROLE, liquidator);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
@@ -252,9 +253,7 @@ contract LiquidationExchangeTest is Test {
     function test_liquidateCollateralBatch_revertIfCallerIsNotLiquidator() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                address(this),
-                access.COLLATERAL_OPERATOR_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.COLLATERAL_OPERATOR_ROLE
             )
         );
         exchange.liquidateCollateralBatch(new ILiquidation.LiquidationParams[](0));

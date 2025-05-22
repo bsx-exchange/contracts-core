@@ -24,6 +24,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR, WETH9} from "contracts/exchange/share/Constants.sol";
 
 // solhint-disable max-states-count
@@ -65,13 +66,12 @@ contract BalanceExchangeTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
-        access.grantRole(access.BATCH_OPERATOR_ROLE(), sequencer);
-        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), sequencer);
-        access.grantRole(access.SIGNER_OPERATOR_ROLE(), sequencer);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
+        access.grantRole(Roles.BATCH_OPERATOR_ROLE, sequencer);
+        access.grantRole(Roles.COLLATERAL_OPERATOR_ROLE, sequencer);
+        access.grantRole(Roles.SIGNER_OPERATOR_ROLE, sequencer);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
@@ -2069,7 +2069,7 @@ contract BalanceExchangeTest is Test {
 
     function test_setCanDeposit_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(

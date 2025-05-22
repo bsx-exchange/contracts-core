@@ -17,6 +17,7 @@ import {ISpot} from "./interfaces/ISpot.sol";
 import {ISwap} from "./interfaces/ISwap.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
+import {Roles} from "./lib/Roles.sol";
 import {BSX_TOKEN, PRICE_SCALE, UNIVERSAL_SIG_VALIDATOR, USDC_TOKEN, ZERO_NONCE} from "./share/Constants.sol";
 
 /// @title Clearinghouse contract
@@ -74,7 +75,7 @@ contract ClearingService is IClearingService, Initializable {
     }
 
     /// @inheritdoc IClearingService
-    function addYieldAsset(address token, address yieldAsset) external onlyRole(access.GENERAL_ROLE()) {
+    function addYieldAsset(address token, address yieldAsset) external onlyRole(Roles.GENERAL_ROLE) {
         if (!access.getExchange().isSupportedToken(token)) {
             revert Errors.Exchange_TokenNotSupported(token);
         }
@@ -123,8 +124,6 @@ contract ClearingService is IClearingService, Initializable {
         address assetOut = params.assetOut;
         uint256 minAmountOut = params.minAmountOut;
         uint256 nonce = params.nonce;
-
-        _assertMainAccount(account);
 
         SwapType swapType;
         if (yieldAssets[assetIn] == assetOut) {

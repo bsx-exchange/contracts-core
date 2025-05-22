@@ -18,6 +18,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {ISwap} from "contracts/exchange/interfaces/ISwap.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 
 contract YieldClearingServiceTest is Test {
@@ -46,10 +47,10 @@ contract YieldClearingServiceTest is Test {
         (user, userKey) = makeAddrAndKey("user");
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(
             address(this)
         ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), admin);
+        access.grantRole(Roles.GENERAL_ROLE, admin);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
@@ -96,7 +97,7 @@ contract YieldClearingServiceTest is Test {
 
     function test_addYieldAsset_revertsIfUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.expectRevert(
             abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, malicious, role)
@@ -468,7 +469,7 @@ contract YieldClearingServiceTest is Test {
         clearingService.liquidateYieldAssetIfNecessary(user, token);
     }
 
-    function test_innerSwapYieldAssetPermit_revertsIfCallerNotClearingService() public {
+    function test_innerswapYieldAssetPermit_revertsIfCallerNotClearingService() public {
         address account;
         address assetIn;
         uint256 amountIn;

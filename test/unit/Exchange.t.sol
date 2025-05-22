@@ -18,6 +18,7 @@ import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {
     BSX_TOKEN,
     NATIVE_ETH,
@@ -56,13 +57,12 @@ contract ExchangeTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
-        access.grantRole(access.BATCH_OPERATOR_ROLE(), sequencer);
-        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), sequencer);
-        access.grantRole(access.SIGNER_OPERATOR_ROLE(), sequencer);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
+        access.grantRole(Roles.BATCH_OPERATOR_ROLE, sequencer);
+        access.grantRole(Roles.COLLATERAL_OPERATOR_ROLE, sequencer);
+        access.grantRole(Roles.SIGNER_OPERATOR_ROLE, sequencer);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
@@ -142,7 +142,7 @@ contract ExchangeTest is Test {
 
     function test_addSupportedToken_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -198,7 +198,7 @@ contract ExchangeTest is Test {
         assertEq(exchange.isSupportedToken(supportedToken), true);
 
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -217,7 +217,7 @@ contract ExchangeTest is Test {
 
     function test_updateFeeRecipient_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -477,7 +477,7 @@ contract ExchangeTest is Test {
 
     function test_processBatch_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.BATCH_OPERATOR_ROLE();
+        bytes32 role = Roles.BATCH_OPERATOR_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -650,7 +650,7 @@ contract ExchangeTest is Test {
 
     function test_unregisterSigningWallet_revertsIfUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.SIGNER_OPERATOR_ROLE();
+        bytes32 role = Roles.SIGNER_OPERATOR_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -751,7 +751,7 @@ contract ExchangeTest is Test {
 
     function test_claimCollectedTradingFees_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -894,7 +894,7 @@ contract ExchangeTest is Test {
 
     function test_claimCollectedSequencerFees_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -963,7 +963,7 @@ contract ExchangeTest is Test {
 
     function test_depositInsuranceFund_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -1039,7 +1039,7 @@ contract ExchangeTest is Test {
 
     function test_withdrawInsuranceFund_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -1073,7 +1073,7 @@ contract ExchangeTest is Test {
 
     function test_setPauseBatchProcess_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(
@@ -1096,7 +1096,7 @@ contract ExchangeTest is Test {
 
     function test_setCanWithdraw_revertsWhenUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
 
         vm.startPrank(malicious);
         vm.expectRevert(

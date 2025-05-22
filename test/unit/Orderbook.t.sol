@@ -11,6 +11,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {
     BSX_ORACLE,
     BSX_TOKEN,
@@ -45,7 +46,7 @@ contract OrderbookTest is Test {
 
     function setUp() public {
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(
             address(this)
         ).checked_write(true);
 

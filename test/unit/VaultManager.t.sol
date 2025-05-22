@@ -14,6 +14,7 @@ import {Spot} from "contracts/exchange/Spot.sol";
 import {IVaultManager, VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 
 contract VaultManagerTest is Test {
@@ -56,11 +57,10 @@ contract VaultManagerTest is Test {
         vm.etch(address(UNIVERSAL_SIG_VALIDATOR), code);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
-        access.grantRole(access.BATCH_OPERATOR_ROLE(), sequencer);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
+        access.grantRole(Roles.BATCH_OPERATOR_ROLE, sequencer);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
@@ -94,7 +94,7 @@ contract VaultManagerTest is Test {
 
     function test_registerVault_success() public {
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
 
         vm.expectEmit(address(exchange));
         emit IExchange.RegisterVault(vault, feeRecipient, profitShareBps);
@@ -112,7 +112,7 @@ contract VaultManagerTest is Test {
 
     function test_registerVault_revertIfUnauthorized() public {
         address malicious = makeAddr("malicious");
-        bytes32 role = access.GENERAL_ROLE();
+        bytes32 role = Roles.GENERAL_ROLE;
         bytes memory signature;
 
         vm.expectRevert(
@@ -130,7 +130,7 @@ contract VaultManagerTest is Test {
 
     function test_registerVault_revertIfVaultAlreadyRegistered() public {
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
 
         vm.prank(sequencer);
         exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
@@ -148,7 +148,7 @@ contract VaultManagerTest is Test {
 
     function test_registerVault_revertIfInvalidVaultAddress() public {
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
         vm.prank(sequencer);
         exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
 
@@ -163,7 +163,7 @@ contract VaultManagerTest is Test {
     function test_registerVault_revertIfInvalidFeeRecipient() public {
         (address newVault, uint256 newVaultPrivKey) = makeAddrAndKey("newVault");
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, newVault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(newVaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(newVaultPrivKey, structHash);
         vm.prank(sequencer);
         exchange.registerVault(newVault, feeRecipient, profitShareBps, signature);
 
@@ -183,7 +183,7 @@ contract VaultManagerTest is Test {
     function test_registerVault_revertIfInvalidProfitShareBps() public {
         profitShareBps = 10_001;
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.Vault_InvalidProfitShareBps.selector, vault, profitShareBps));
 
@@ -193,7 +193,7 @@ contract VaultManagerTest is Test {
 
     function test_registerVault_revertIfInvalidSignature() public {
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
 
         vm.expectRevert(abi.encodeWithSelector(Errors.InvalidSignature.selector, vault));
 
@@ -203,7 +203,7 @@ contract VaultManagerTest is Test {
 
     function test_registerVault_revertIfVaultBalanceIsNotZero() public {
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
 
         _depositExchange(collateralToken1, vault, 1);
 
@@ -222,7 +222,7 @@ contract VaultManagerTest is Test {
 
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -273,7 +273,7 @@ contract VaultManagerTest is Test {
         uint256 expectedShares1 = 25 ether;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount1, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -311,7 +311,7 @@ contract VaultManagerTest is Test {
         uint256 stakeAmount2 = 50 ether;
         uint256 expectedShares2 = 50 ether;
         structHash = keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount2, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -354,7 +354,7 @@ contract VaultManagerTest is Test {
         uint256 stakeAmount3 = 150 ether;
         uint256 expectedShares3 = 75 ether;
         structHash = keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount3, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -411,7 +411,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -492,7 +492,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory stakeData = abi.encode(
             IExchange.StakeVaultParams({
                 vault: vault,
@@ -525,7 +525,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(collateralToken1), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -572,7 +572,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount + 1, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -611,7 +611,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -660,7 +660,7 @@ contract VaultManagerTest is Test {
 
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -714,7 +714,7 @@ contract VaultManagerTest is Test {
 
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -753,7 +753,7 @@ contract VaultManagerTest is Test {
         // 1. stake 100 ether with price 1 ether
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -779,7 +779,7 @@ contract VaultManagerTest is Test {
         assertEq(vaultManager.convertToAssets(vault, expectedShares), unstakeAmount);
 
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -829,7 +829,7 @@ contract VaultManagerTest is Test {
         unstakeAmount = 40 ether;
         expectedShares = 40 ether;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -885,7 +885,7 @@ contract VaultManagerTest is Test {
         // stake 100 ether with price 1 ether
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.StakeVault,
             abi.encode(
@@ -914,7 +914,7 @@ contract VaultManagerTest is Test {
         uint256 expectedShares = 40 ether;
         uint256 expectedFee = 2 ether;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -1022,14 +1022,14 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
         // unstake
         uint256 unstakeAmount = 5 ether;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory unstakeData = abi.encode(
             IExchange.UnstakeVaultParams({
                 vault: vault,
@@ -1063,7 +1063,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
@@ -1071,7 +1071,7 @@ contract VaultManagerTest is Test {
         uint256 unstakeAmount = 5 ether;
         address invalidToken = makeAddr("invalidToken");
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, invalidToken, unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -1117,7 +1117,7 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
@@ -1125,7 +1125,7 @@ contract VaultManagerTest is Test {
         uint256 unstakeAmount = 5 ether;
         structHash =
             keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount + 1, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -1171,14 +1171,14 @@ contract VaultManagerTest is Test {
         uint256 nonce = 5;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
         // unstake
         uint256 unstakeAmount = stakeAmount + 1;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -1226,7 +1226,7 @@ contract VaultManagerTest is Test {
         uint256 stakeAmount = 80 ether;
         bytes32 structHash =
             keccak256(abi.encode(STAKE_VAULT_TYPEHASH, vault, staker, address(asset), stakeAmount, nonce));
-        bytes memory signature = _signTypedData(stakerPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(stakerPrivKey, structHash);
         vm.prank(address(exchange));
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
@@ -1237,7 +1237,7 @@ contract VaultManagerTest is Test {
 
         uint256 unstakeAmount = 1;
         structHash = keccak256(abi.encode(UNSTAKE_VAULT_TYPEHASH, vault, staker, address(asset), unstakeAmount, nonce));
-        signature = _signTypedData(stakerPrivKey, structHash);
+        signature = _signTypedDataHash(stakerPrivKey, structHash);
         bytes memory operation = _encodeDataToOperation(
             IExchange.OperationType.UnstakeVault,
             abi.encode(
@@ -1292,12 +1292,12 @@ contract VaultManagerTest is Test {
 
     function _registerVault() private {
         bytes32 structHash = keccak256(abi.encode(REGISTER_VAULT_TYPEHASH, vault, feeRecipient, profitShareBps));
-        bytes memory signature = _signTypedData(vaultPrivKey, structHash);
+        bytes memory signature = _signTypedDataHash(vaultPrivKey, structHash);
         vm.prank(sequencer);
         exchange.registerVault(vault, feeRecipient, profitShareBps, signature);
     }
 
-    function _signTypedData(uint256 privateKey, bytes32 structHash) private view returns (bytes memory) {
+    function _signTypedDataHash(uint256 privateKey, bytes32 structHash) private view returns (bytes memory) {
         return Helper.signTypedDataHash(exchange, privateKey, structHash);
     }
 }

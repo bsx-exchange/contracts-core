@@ -16,6 +16,7 @@ import {Errors} from "../exchange/lib/Errors.sol";
 import {MathHelper} from "../exchange/lib/MathHelper.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "../exchange/share/Constants.sol";
 import {IBSX1000x} from "./interfaces/IBSX1000x.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 
 /// @title BSX1000x contract
 /// @dev This contract is upgradeable.
@@ -160,7 +161,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     /// @inheritdoc IBSX1000x
     function withdraw(address account, uint256 amount, uint256 fee, uint256 nonce, bytes memory signature)
         public
-        onlyRole(access.BSX1000_OPERATOR_ROLE())
+        onlyRole(Roles.BSX1000_OPERATOR_ROLE)
     {
         uint256 netAmount = amount - fee;
         uint256 amountToTransfer = netAmount.convertFromScale(address(collateralToken));
@@ -197,7 +198,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     /// @inheritdoc IBSX1000x
     function transferToExchange(address account, uint256 amount, uint256 nonce, bytes memory signature)
         external
-        onlyRole(access.BSX1000_OPERATOR_ROLE())
+        onlyRole(Roles.BSX1000_OPERATOR_ROLE)
     {
         if (isTransferToExchangeNonceUsed[account][nonce]) {
             revert TransferToExchange_UsedNonce(account, nonce);
@@ -247,7 +248,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     /// @inheritdoc IBSX1000x
     function openPosition(Order calldata order, uint256 credit, bytes memory signature)
         public
-        onlyRole(access.BSX1000_OPERATOR_ROLE())
+        onlyRole(Roles.BSX1000_OPERATOR_ROLE)
     {
         _assertMainAccount(order.account);
 
@@ -347,7 +348,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         int256 pnl,
         int256 fee,
         bytes memory signature
-    ) external onlyRole(access.BSX1000_OPERATOR_ROLE()) {
+    ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) {
         bytes32 closeOrderHash =
             _hashTypedDataV4(keccak256(abi.encode(CLOSE_POSITION_TYPEHASH, productId, account, nonce)));
         _validateAuthorization(account, closeOrderHash, signature);
@@ -395,7 +396,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         int256 pnl,
         int256 fee,
         ClosePositionReason reason
-    ) external onlyRole(access.BSX1000_OPERATOR_ROLE()) {
+    ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) {
         // update position
         Position storage position = _position[account][nonce];
         if (position.status != PositionStatus.Open) {
@@ -445,7 +446,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @inheritdoc IBSX1000x
-    function withdrawFund(uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
+    function withdrawFund(uint256 amount) external onlyRole(Roles.GENERAL_ROLE) {
         if (amount > generalFund) {
             revert InsufficientFundBalance();
         }
@@ -461,7 +462,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @inheritdoc IBSX1000x
-    function openIsolatedFund(uint32 productId) external onlyRole(access.GENERAL_ROLE()) {
+    function openIsolatedFund(uint32 productId) external onlyRole(Roles.GENERAL_ROLE) {
         if (!_isolatedFunds.contains(productId)) {
             uint256 initialFund = 0;
             _isolatedFunds.set(productId, initialFund);
@@ -470,7 +471,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @inheritdoc IBSX1000x
-    function closeIsolatedFund(uint32 productId) external onlyRole(access.GENERAL_ROLE()) {
+    function closeIsolatedFund(uint32 productId) external onlyRole(Roles.GENERAL_ROLE) {
         if (!_isolatedFunds.contains(productId)) {
             revert IsolatedFundDisabled();
         }
@@ -500,7 +501,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @notice Set lock fund factor when opening position
-    function setLockFactor(uint256 factor) external onlyRole(access.GENERAL_ROLE()) {
+    function setLockFactor(uint256 factor) external onlyRole(Roles.GENERAL_ROLE) {
         lockFactor = factor;
     }
 

@@ -18,6 +18,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {ISwap} from "contracts/exchange/interfaces/ISwap.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 
 contract SwapExchangeTest is Test {
@@ -51,11 +52,10 @@ contract SwapExchangeTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
-        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), sequencer);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
+        access.grantRole(Roles.COLLATERAL_OPERATOR_ROLE, sequencer);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));
@@ -240,9 +240,7 @@ contract SwapExchangeTest is Test {
     function test_swapCollateralBatch_revertIfCallerIsNotSequencer() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector,
-                address(this),
-                access.COLLATERAL_OPERATOR_ROLE()
+                IAccessControl.AccessControlUnauthorizedAccount.selector, address(this), Roles.COLLATERAL_OPERATOR_ROLE
             )
         );
         exchange.swapCollateralBatch(new ISwap.SwapParams[](0));

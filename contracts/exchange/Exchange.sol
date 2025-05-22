@@ -16,7 +16,7 @@ import {IOrderBook} from "./interfaces/IOrderBook.sol";
 import {IVaultManager} from "./interfaces/IVaultManager.sol";
 import {Errors} from "./lib/Errors.sol";
 import {MathHelper} from "./lib/MathHelper.sol";
-
+import {Roles} from "./lib/Roles.sol";
 import {AccountLogic} from "./lib/logic/AccountLogic.sol";
 import {AdminLogic} from "./lib/logic/AdminLogic.sol";
 import {BalanceLogic} from "./lib/logic/BalanceLogic.sol";
@@ -93,19 +93,19 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     receive() external payable {}
 
     /// @inheritdoc IExchange
-    function addSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
+    function addSupportedToken(address token) external onlyRole(Roles.GENERAL_ROLE) {
         return AdminLogic.addSupportedToken(clearingService, supportedTokens, token);
     }
 
     /// @inheritdoc IExchange
-    function removeSupportedToken(address token) external onlyRole(access.GENERAL_ROLE()) {
+    function removeSupportedToken(address token) external onlyRole(Roles.GENERAL_ROLE) {
         return AdminLogic.removeSupportedToken(supportedTokens, token);
     }
 
     /// @inheritdoc IExchange
     function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes calldata signature)
         external
-        onlyRole(access.GENERAL_ROLE())
+        onlyRole(Roles.GENERAL_ROLE)
     {
         if (_accounts[vault].accountType != AccountType.Main) {
             revert Errors.Exchange_InvalidAccountType(vault);
@@ -166,12 +166,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external onlyRole(access.GENERAL_ROLE()) {
+    ) external onlyRole(Roles.GENERAL_ROLE) {
         _depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature, true);
     }
 
     /// @inheritdoc IExchange
-    function depositInsuranceFund(address token, uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
+    function depositInsuranceFund(address token, uint256 amount) external onlyRole(Roles.GENERAL_ROLE) {
         (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
@@ -183,7 +183,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function withdrawInsuranceFund(address token, uint256 amount) external onlyRole(access.GENERAL_ROLE()) {
+    function withdrawInsuranceFund(address token, uint256 amount) external onlyRole(Roles.GENERAL_ROLE) {
         uint256 amountToTransfer = amount.convertFromScale(token);
         if (amount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
@@ -195,17 +195,17 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function claimTradingFees() external onlyRole(access.GENERAL_ROLE()) {
+    function claimTradingFees() external onlyRole(Roles.GENERAL_ROLE) {
         return AdminLogic.claimTradingFees(book, msg.sender, feeRecipientAddress);
     }
 
     /// @inheritdoc IExchange
-    function claimSequencerFees() external onlyRole(access.GENERAL_ROLE()) {
+    function claimSequencerFees() external onlyRole(Roles.GENERAL_ROLE) {
         return AdminLogic.claimSequencerFees(_collectedFee, this, book, msg.sender, feeRecipientAddress);
     }
 
     /// @inheritdoc IExchange
-    function processBatch(bytes[] calldata operations) external onlyRole(access.BATCH_OPERATOR_ROLE()) {
+    function processBatch(bytes[] calldata operations) external onlyRole(Roles.BATCH_OPERATOR_ROLE) {
         if (pauseBatchProcess) {
             revert Errors.Exchange_PausedProcessBatch();
         }
@@ -220,7 +220,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @inheritdoc ILiquidation
     function liquidateCollateralBatch(LiquidationParams[] calldata params)
         external
-        onlyRole(access.COLLATERAL_OPERATOR_ROLE())
+        onlyRole(Roles.COLLATERAL_OPERATOR_ROLE)
     {
         return LiquidationLogic.liquidateCollateralBatch(isLiquidationNonceUsed, this, params);
     }
@@ -244,7 +244,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc ISwap
-    function swapCollateralBatch(SwapParams[] calldata params) external onlyRole(access.COLLATERAL_OPERATOR_ROLE()) {
+    function swapCollateralBatch(SwapParams[] calldata params) external onlyRole(Roles.COLLATERAL_OPERATOR_ROLE) {
         SwapLogic.swapCollateralBatch(isSwapNonceUsed, this, params);
     }
 
@@ -276,7 +276,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function updateFeeRecipientAddress(address _feeRecipientAddress) external onlyRole(access.GENERAL_ROLE()) {
+    function updateFeeRecipientAddress(address _feeRecipientAddress) external onlyRole(Roles.GENERAL_ROLE) {
         if (_feeRecipientAddress == address(0)) {
             revert Errors.ZeroAddress();
         }
@@ -297,7 +297,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @inheritdoc IExchange
     function createSubaccount(address main, address subaccount, bytes memory mainSignature, bytes memory subSignature)
         external
-        onlyRole(access.GENERAL_ROLE())
+        onlyRole(Roles.GENERAL_ROLE)
     {
         return AccountLogic.createSubaccount(_accounts, access, this, main, subaccount, mainSignature, subSignature);
     }
@@ -311,25 +311,22 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function unregisterSigningWallet(address account, address signer)
-        external
-        onlyRole(access.SIGNER_OPERATOR_ROLE())
-    {
+    function unregisterSigningWallet(address account, address signer) external onlyRole(Roles.SIGNER_OPERATOR_ROLE) {
         _signingWallets[account][signer] = false;
     }
 
     /// @inheritdoc IExchange
-    function setPauseBatchProcess(bool _pauseBatchProcess) external onlyRole(access.GENERAL_ROLE()) {
+    function setPauseBatchProcess(bool _pauseBatchProcess) external onlyRole(Roles.GENERAL_ROLE) {
         pauseBatchProcess = _pauseBatchProcess;
     }
 
     /// @inheritdoc IExchange
-    function setCanDeposit(bool _canDeposit) external onlyRole(access.GENERAL_ROLE()) {
+    function setCanDeposit(bool _canDeposit) external onlyRole(Roles.GENERAL_ROLE) {
         canDeposit = _canDeposit;
     }
 
     /// @inheritdoc IExchange
-    function setCanWithdraw(bool _canWithdraw) external onlyRole(access.GENERAL_ROLE()) {
+    function setCanWithdraw(bool _canWithdraw) external onlyRole(Roles.GENERAL_ROLE) {
         canWithdraw = _canWithdraw;
     }
 

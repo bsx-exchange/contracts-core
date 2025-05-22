@@ -6,6 +6,7 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 import {ISpot, Spot} from "contracts/exchange/Spot.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {BSX_ORACLE} from "contracts/exchange/share/Constants.sol";
 import {IBsxOracle} from "contracts/misc/interfaces/IBsxOracle.sol";
 
@@ -22,10 +23,10 @@ contract SpotEngineTest is Test {
 
     function setUp() public {
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(
             address(this)
         ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
 
         access.setExchange(exchange);
         access.setClearingService(clearingService);

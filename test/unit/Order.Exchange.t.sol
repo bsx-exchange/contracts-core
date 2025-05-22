@@ -18,6 +18,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Percentage} from "contracts/exchange/lib/Percentage.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {BSX_ORACLE, BSX_TOKEN, MAX_REBATE_RATE, UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
 import {IBsxOracle} from "contracts/misc/interfaces/IBsxOracle.sol";
 
@@ -58,13 +59,12 @@ contract OrderExchangeTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
-        access.grantRole(access.BATCH_OPERATOR_ROLE(), sequencer);
-        access.grantRole(access.COLLATERAL_OPERATOR_ROLE(), sequencer);
-        access.grantRole(access.SIGNER_OPERATOR_ROLE(), sequencer);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
+        access.grantRole(Roles.BATCH_OPERATOR_ROLE, sequencer);
+        access.grantRole(Roles.COLLATERAL_OPERATOR_ROLE, sequencer);
+        access.grantRole(Roles.SIGNER_OPERATOR_ROLE, sequencer);
 
         clearingService = new ClearingService();
         stdstore.target(address(clearingService)).sig("access()").checked_write(address(access));

@@ -6,6 +6,7 @@ import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 import {IPerp, Perp} from "contracts/exchange/Perp.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 
 contract PerpTest is Test {
     using stdStorage for StdStorage;
@@ -19,7 +20,7 @@ contract PerpTest is Test {
 
     function setUp() public {
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(
             address(this)
         ).checked_write(true);
 

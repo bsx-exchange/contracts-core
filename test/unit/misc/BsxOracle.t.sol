@@ -6,6 +6,7 @@ import {TransparentUpgradeableProxy} from "@openzeppelin/contracts/proxy/transpa
 import {StdStorage, Test, stdStorage} from "forge-std/Test.sol";
 
 import {Access} from "contracts/exchange/access/Access.sol";
+import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {IChainlinkAggregatorV3} from "contracts/external/chainlink/IChainlinkAggregatorV3.sol";
 import {BsxOracle} from "contracts/misc/BsxOracle.sol";
 
@@ -23,10 +24,9 @@ contract BsxOracleTest is Test {
         vm.startPrank(sequencer);
 
         access = new Access();
-        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(access.ADMIN_ROLE()).with_key(
-            sequencer
-        ).checked_write(true);
-        access.grantRole(access.GENERAL_ROLE(), sequencer);
+        stdstore.target(address(access)).sig("hasRole(bytes32,address)").with_key(Roles.ADMIN_ROLE).with_key(sequencer)
+            .checked_write(true);
+        access.grantRole(Roles.GENERAL_ROLE, sequencer);
 
         address[] memory tokens = new address[](1);
         tokens[0] = token;
@@ -62,9 +62,7 @@ contract BsxOracleTest is Test {
         address anyone = makeAddr("anyone");
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                IAccessControl.AccessControlUnauthorizedAccount.selector, anyone, access.GENERAL_ROLE()
-            )
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, anyone, Roles.GENERAL_ROLE)
         );
 
         vm.startPrank(anyone);
