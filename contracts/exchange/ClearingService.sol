@@ -26,6 +26,7 @@ import {
     USDC_TOKEN,
     ZERO_NONCE
 } from "./share/Constants.sol";
+import {TxStatus} from "./share/Enums.sol";
 
 /// @title Clearinghouse contract
 /// @notice Manage insurance fund and spot balance
@@ -119,7 +120,7 @@ contract ClearingService is IClearingService, Initializable {
             address(0),
             0,
             SwapType.EarnYieldAsset,
-            ActionStatus.Success
+            TxStatus.Success
         );
     }
 
@@ -149,9 +150,7 @@ contract ClearingService is IClearingService, Initializable {
             keccak256(abi.encode(SWAP_TYPEHASH, account, assetIn, amountIn, assetOut, minAmountOut, nonce))
         );
         if (!UNIVERSAL_SIG_VALIDATOR.isValidSig(account, swapCollateralHash, params.signature)) {
-            emit SwapAssets(
-                account, nonce, assetIn, amountIn, assetOut, 0, address(0), 0, swapType, ActionStatus.Failure
-            );
+            emit SwapAssets(account, nonce, assetIn, amountIn, assetOut, 0, address(0), 0, swapType, TxStatus.Failure);
             return;
         }
 
@@ -159,12 +158,10 @@ contract ClearingService is IClearingService, Initializable {
             uint256 amountOut
         ) {
             emit SwapAssets(
-                account, nonce, assetIn, amountIn, assetOut, amountOut, address(0), 0, swapType, ActionStatus.Success
+                account, nonce, assetIn, amountIn, assetOut, amountOut, address(0), 0, swapType, TxStatus.Success
             );
         } catch {
-            emit SwapAssets(
-                account, nonce, assetIn, amountIn, assetOut, 0, address(0), 0, swapType, ActionStatus.Failure
-            );
+            emit SwapAssets(account, nonce, assetIn, amountIn, assetOut, 0, address(0), 0, swapType, TxStatus.Failure);
         }
     }
 
@@ -197,7 +194,7 @@ contract ClearingService is IClearingService, Initializable {
                 address(0),
                 0,
                 SwapType.LiquidateYieldAsset,
-                ActionStatus.Success
+                TxStatus.Success
             );
         } catch {
             emit SwapAssets(
@@ -210,7 +207,7 @@ contract ClearingService is IClearingService, Initializable {
                 address(0),
                 0,
                 SwapType.LiquidateYieldAsset,
-                ActionStatus.Failure
+                TxStatus.Failure
             );
         }
     }

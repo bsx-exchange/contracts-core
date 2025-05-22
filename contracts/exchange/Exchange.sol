@@ -25,6 +25,7 @@ import {OrderLogic} from "./lib/logic/OrderLogic.sol";
 import {SignerLogic} from "./lib/logic/SignerLogic.sol";
 import {SwapLogic} from "./lib/logic/SwapLogic.sol";
 import {BSX_TOKEN, NATIVE_ETH} from "./share/Constants.sol";
+import {MultiTxStatus, TxStatus} from "./share/Enums.sol";
 
 /// @title Exchange contract
 /// @notice This contract is entry point of the exchange
@@ -219,11 +220,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc ILiquidation
-    function innerLiquidation(LiquidationParams calldata params)
-        external
-        internalCall
-        returns (AccountLiquidationStatus status)
-    {
+    function innerLiquidation(LiquidationParams calldata params) external internalCall returns (MultiTxStatus status) {
         return LiquidationLogic.executeLiquidation(
             supportedTokens,
             LiquidationLogic.LiquidationEngines({
@@ -546,13 +543,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             this, _accounts, BalanceLogic.BalanceEngine(clearingService, spotEngine), signer, params
         ) {
             emit Transfer(
-                params.token,
-                params.from,
-                params.to,
-                signer,
-                params.nonce,
-                params.amount.safeInt256(),
-                ActionStatus.Success
+                params.token, params.from, params.to, signer, params.nonce, params.amount.safeInt256(), TxStatus.Success
             );
         } catch {
             emit Transfer(
@@ -562,7 +553,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
                 address(0),
                 params.nonce,
                 params.amount.safeInt256(),
-                ActionStatus.Failure
+                TxStatus.Failure
             );
         }
     }
@@ -580,13 +571,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
             BalanceLogic.BalanceEngine(clearingService, spotEngine),
             params
         ) returns (uint256 balance) {
-            emit TransferToBSX1000(
-                params.token, params.account, params.nonce, params.amount, balance, TransferToBSX1000Status.Success
-            );
+            emit TransferToBSX1000(params.token, params.account, params.nonce, params.amount, balance, TxStatus.Success);
         } catch {
-            emit TransferToBSX1000(
-                params.token, params.account, params.nonce, params.amount, 0, TransferToBSX1000Status.Failure
-            );
+            emit TransferToBSX1000(params.token, params.account, params.nonce, params.amount, 0, TxStatus.Failure);
         }
     }
 
@@ -601,11 +588,9 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         try vaultManager.stake(data.vault, data.account, data.token, data.amount, data.nonce, data.signature) returns (
             uint256 shares
         ) {
-            emit StakeVault(
-                data.vault, data.account, data.nonce, data.token, data.amount, shares, VaultActionStatus.Success
-            );
+            emit StakeVault(data.vault, data.account, data.nonce, data.token, data.amount, shares, TxStatus.Success);
         } catch {
-            emit StakeVault(data.vault, data.account, data.nonce, data.token, data.amount, 0, VaultActionStatus.Failure);
+            emit StakeVault(data.vault, data.account, data.nonce, data.token, data.amount, 0, TxStatus.Failure);
         }
     }
 
@@ -628,28 +613,20 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
                 shares,
                 fee,
                 feeRecipient,
-                VaultActionStatus.Success
+                TxStatus.Success
             );
         } catch {
             emit UnstakeVault(
-                data.vault,
-                data.account,
-                data.nonce,
-                data.token,
-                data.amount,
-                0,
-                0,
-                address(0),
-                VaultActionStatus.Failure
+                data.vault, data.account, data.nonce, data.token, data.amount, 0, 0, address(0), TxStatus.Failure
             );
         }
     }
 
     function _deleteSubaccount(DeleteSubaccountParams memory params) internal {
         try AccountLogic.deleteSubaccount(_accounts, access, this, params) {
-            emit DeleteSubaccount(params.main, params.subaccount, ActionStatus.Success);
+            emit DeleteSubaccount(params.main, params.subaccount, TxStatus.Success);
         } catch {
-            emit DeleteSubaccount(params.main, params.subaccount, ActionStatus.Failure);
+            emit DeleteSubaccount(params.main, params.subaccount, TxStatus.Failure);
         }
     }
 

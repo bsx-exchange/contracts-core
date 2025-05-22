@@ -20,6 +20,7 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
+import {TxStatus} from "contracts/exchange/share/Enums.sol";
 
 contract SwapExchangeTest is Test {
     using stdStorage for StdStorage;
@@ -161,7 +162,7 @@ contract SwapExchangeTest is Test {
             amountOutX18,
             address(tokenIn),
             feeAmountX18,
-            ISwap.SwapCollateralStatus.Success
+            TxStatus.Success
         );
         exchange.swapCollateralBatch(params);
 
@@ -216,15 +217,7 @@ contract SwapExchangeTest is Test {
         vm.prank(sequencer);
         vm.expectEmit(address(exchange));
         emit ISwap.SwapCollateral(
-            user,
-            nonce,
-            address(tokenIn),
-            amountInX18,
-            address(tokenOut),
-            0,
-            address(tokenIn),
-            0,
-            ISwap.SwapCollateralStatus.Failure
+            user, nonce, address(tokenIn), amountInX18, address(tokenOut), 0, address(tokenIn), 0, TxStatus.Failure
         );
         exchange.swapCollateralBatch(params);
 

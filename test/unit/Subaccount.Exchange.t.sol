@@ -18,6 +18,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {BSX_TOKEN, UNIVERSAL_SIG_VALIDATOR, USDC_TOKEN} from "contracts/exchange/share/Constants.sol";
+import {TxStatus} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
 contract ExchangeTest is Test {
@@ -353,10 +354,10 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.Transfer(address(token), sub1, main, address(0), 0, 100e18, IExchange.ActionStatus.Success);
+        emit IExchange.Transfer(address(token), sub1, main, address(0), 0, 100e18, TxStatus.Success);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(main, sub1, IExchange.ActionStatus.Success);
+        emit IExchange.DeleteSubaccount(main, sub1, TxStatus.Success);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -401,7 +402,7 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(main, sub, IExchange.ActionStatus.Failure);
+        emit IExchange.DeleteSubaccount(main, sub, TxStatus.Failure);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -430,7 +431,7 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(invalidMain, subaccount, IExchange.ActionStatus.Failure);
+        emit IExchange.DeleteSubaccount(invalidMain, subaccount, TxStatus.Failure);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -475,7 +476,7 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(main, invalidSubaccount, IExchange.ActionStatus.Failure);
+        emit IExchange.DeleteSubaccount(main, invalidSubaccount, TxStatus.Failure);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -520,7 +521,7 @@ contract ExchangeTest is Test {
         bytes memory operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(anotherMain, subaccount, IExchange.ActionStatus.Failure);
+        emit IExchange.DeleteSubaccount(anotherMain, subaccount, TxStatus.Failure);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -567,7 +568,7 @@ contract ExchangeTest is Test {
         operation = _encodeDataToOperation(IExchange.OperationType.DeleteSubaccount, deleteSubacountData);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(main, subaccount, IExchange.ActionStatus.Failure);
+        emit IExchange.DeleteSubaccount(main, subaccount, TxStatus.Failure);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -610,7 +611,7 @@ contract ExchangeTest is Test {
         vm.mockCall(address(perpEngine), abi.encodeWithSignature("openPositions(address)", subaccount), abi.encode(2));
 
         vm.expectEmit(address(exchange));
-        emit IExchange.DeleteSubaccount(main, subaccount, IExchange.ActionStatus.Failure);
+        emit IExchange.DeleteSubaccount(main, subaccount, TxStatus.Failure);
 
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());

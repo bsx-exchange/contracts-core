@@ -11,6 +11,7 @@ import {IPerp} from "../../interfaces/IPerp.sol";
 import {ISpot} from "../../interfaces/ISpot.sol";
 import {Errors} from "../../lib/Errors.sol";
 import {UNIVERSAL_SIG_VALIDATOR, ZERO_ADDRESS, ZERO_NONCE} from "../../share/Constants.sol";
+import {TxStatus} from "../../share/Enums.sol";
 
 library AccountLogic {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -165,9 +166,7 @@ library AccountLogic {
         int256 balance = spotEngine.getBalance(token, subaccount);
         if (balance != 0) {
             clearingService.transfer(subaccount, main, balance, token);
-            emit IExchange.Transfer(
-                token, subaccount, main, ZERO_ADDRESS, ZERO_NONCE, balance, IExchange.ActionStatus.Success
-            );
+            emit IExchange.Transfer(token, subaccount, main, ZERO_ADDRESS, ZERO_NONCE, balance, TxStatus.Success);
         }
     }
 }

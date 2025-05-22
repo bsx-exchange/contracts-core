@@ -34,8 +34,6 @@ library BalanceLogic {
         keccak256("Transfer(address from,address to,address token,uint256 amount,uint256 nonce)");
     bytes32 public constant WITHDRAW_TYPEHASH =
         keccak256("Withdraw(address sender,address token,uint128 amount,uint64 nonce)");
-    bytes32 public constant SET_NATIVE_YIELD_TYPEHASH =
-        keccak256("SetNativeYield(address account,bool enabled,string message,uint256 nonce)");
 
     /// @notice Deposits token to spot account
     function deposit(

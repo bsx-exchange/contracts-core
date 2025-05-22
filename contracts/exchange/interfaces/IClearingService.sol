@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {TxStatus} from "../share/Enums.sol";
 import {ISwap} from "./ISwap.sol";
 
 /// @title Clearing service interface
 /// @notice Manage insurance fund and spot balance
 interface IClearingService {
-    enum ActionStatus {
-        Success,
-        Failure
-    }
-
     enum SwapType {
         Unknown,
         DepositVault,
@@ -52,7 +48,7 @@ interface IClearingService {
         address feeAsset,
         uint256 feeAmount,
         SwapType swapType,
-        ActionStatus status
+        TxStatus status
     );
 
     /// @notice Add a new yield asset for a token to farm yield for user collateral

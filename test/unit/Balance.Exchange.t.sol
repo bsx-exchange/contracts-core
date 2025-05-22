@@ -26,6 +26,7 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {NATIVE_ETH, UNIVERSAL_SIG_VALIDATOR, WETH9} from "contracts/exchange/share/Constants.sol";
+import {TxStatus} from "contracts/exchange/share/Enums.sol";
 
 // solhint-disable max-states-count
 contract BalanceExchangeTest is Test {
@@ -536,7 +537,7 @@ contract BalanceExchangeTest is Test {
             address(0),
             0,
             IClearingService.SwapType.EarnYieldAsset,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         exchange.depositMaxApproved(user, address(collateralToken), earnYield);
@@ -577,7 +578,7 @@ contract BalanceExchangeTest is Test {
             address(0),
             0,
             IClearingService.SwapType.EarnYieldAsset,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         exchange.depositAndEarn(address(collateralToken), uint128(amount));
@@ -656,7 +657,7 @@ contract BalanceExchangeTest is Test {
             address(0),
             0,
             IClearingService.SwapType.EarnYieldAsset,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         exchange.depositAndEarn(address(collateralToken), uint128(amount));
@@ -715,7 +716,7 @@ contract BalanceExchangeTest is Test {
             address(0),
             0,
             IClearingService.SwapType.EarnYieldAsset,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -765,12 +766,7 @@ contract BalanceExchangeTest is Test {
         uint256 balanceAfter = totalBalanceStateBefore - transferAmount;
         vm.expectEmit(address(exchange));
         emit IExchange.TransferToBSX1000(
-            address(collateralToken),
-            account,
-            nonce,
-            transferAmount,
-            balanceAfter,
-            IExchange.TransferToBSX1000Status.Success
+            address(collateralToken), account, nonce, transferAmount, balanceAfter, TxStatus.Success
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -836,12 +832,7 @@ contract BalanceExchangeTest is Test {
         uint256 balanceAfter = totalBalanceStateBefore - transferAmount;
         vm.expectEmit(address(exchange));
         emit IExchange.TransferToBSX1000(
-            address(collateralToken),
-            contractAccount,
-            nonce,
-            transferAmount,
-            balanceAfter,
-            IExchange.TransferToBSX1000Status.Success
+            address(collateralToken), contractAccount, nonce, transferAmount, balanceAfter, TxStatus.Success
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -910,9 +901,7 @@ contract BalanceExchangeTest is Test {
         );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.TransferToBSX1000(
-            address(collateralToken), vault, nonce, amount, 0, IExchange.TransferToBSX1000Status.Failure
-        );
+        emit IExchange.TransferToBSX1000(address(collateralToken), vault, nonce, amount, 0, TxStatus.Failure);
 
         vm.startPrank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -941,9 +930,7 @@ contract BalanceExchangeTest is Test {
             abi.encode(IExchange.TransferToBSX1000Params(account, address(collateralToken), amount, nonce, signature))
         );
         vm.expectEmit(address(exchange));
-        emit IExchange.TransferToBSX1000(
-            address(collateralToken), account, nonce, amount, 0, IExchange.TransferToBSX1000Status.Failure
-        );
+        emit IExchange.TransferToBSX1000(address(collateralToken), account, nonce, amount, 0, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -987,9 +974,7 @@ contract BalanceExchangeTest is Test {
         );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.TransferToBSX1000(
-            invalidToken, account, nonce, amount, 0, IExchange.TransferToBSX1000Status.Failure
-        );
+        emit IExchange.TransferToBSX1000(invalidToken, account, nonce, amount, 0, TxStatus.Failure);
         exchange.processBatch(operation.toArray());
 
         assertEq(exchange.isTransferToBSX1000NonceUsed(account, nonce), true);
@@ -1035,9 +1020,7 @@ contract BalanceExchangeTest is Test {
         );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.TransferToBSX1000(
-            address(collateralToken), account, nonce, transferAmount, 0, IExchange.TransferToBSX1000Status.Failure
-        );
+        emit IExchange.TransferToBSX1000(address(collateralToken), account, nonce, transferAmount, 0, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -1084,9 +1067,7 @@ contract BalanceExchangeTest is Test {
         );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.TransferToBSX1000(
-            address(collateralToken), account, nonce, transferAmount, 0, IExchange.TransferToBSX1000Status.Failure
-        );
+        emit IExchange.TransferToBSX1000(address(collateralToken), account, nonce, transferAmount, 0, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -1539,13 +1520,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main1,
-            main2,
-            main1,
-            nonce,
-            int256(transferAmount1),
-            IExchange.ActionStatus.Success
+            address(collateralToken), main1, main2, main1, nonce, int256(transferAmount1), TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1577,13 +1552,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main1,
-            main2,
-            main1,
-            nonce,
-            int256(transferAmount2),
-            IExchange.ActionStatus.Success
+            address(collateralToken), main1, main2, main1, nonce, int256(transferAmount2), TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1622,7 +1591,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken), main, sub, main, nonce, int256(transferAmount), IExchange.ActionStatus.Success
+            address(collateralToken), main, sub, main, nonce, int256(transferAmount), TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1659,7 +1628,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken), sub, main, main, nonce, int256(transferAmount), IExchange.ActionStatus.Success
+            address(collateralToken), sub, main, main, nonce, int256(transferAmount), TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1699,7 +1668,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken), sub1, sub2, main, nonce, int256(transferAmount), IExchange.ActionStatus.Success
+            address(collateralToken), sub1, sub2, main, nonce, int256(transferAmount), TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1736,13 +1705,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main1,
-            main2,
-            main1,
-            nonce,
-            int256(transferAmount1),
-            IExchange.ActionStatus.Success
+            address(collateralToken), main1, main2, main1, nonce, int256(transferAmount1), TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1788,13 +1751,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main1,
-            sub2,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), main1, sub2, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -1813,13 +1770,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            sub1,
-            main2,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), sub1, main2, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -1837,13 +1788,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            sub1,
-            sub2,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), sub1, sub2, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -1868,13 +1813,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main,
-            main,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), main, main, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -1905,13 +1844,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main,
-            vault,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), main, vault, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1929,13 +1862,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            vault,
-            main,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), vault, main, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1973,13 +1900,7 @@ contract BalanceExchangeTest is Test {
         operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main,
-            sub,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), main, sub, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1995,13 +1916,7 @@ contract BalanceExchangeTest is Test {
         operation = _encodeDataToOperation(IExchange.OperationType.Transfer, data);
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            sub,
-            main,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), sub, main, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -2033,13 +1948,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main,
-            sub,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), main, sub, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -2056,13 +1965,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            sub,
-            main,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), sub, main, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -2096,13 +1999,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            main,
-            sub,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), main, sub, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);
@@ -2121,13 +2018,7 @@ contract BalanceExchangeTest is Test {
 
         vm.expectEmit(address(exchange));
         emit IExchange.Transfer(
-            address(collateralToken),
-            sub,
-            main,
-            address(0),
-            nonce,
-            int256(transferAmount),
-            IExchange.ActionStatus.Failure
+            address(collateralToken), sub, main, address(0), nonce, int256(transferAmount), TxStatus.Failure
         );
 
         vm.prank(sequencer);

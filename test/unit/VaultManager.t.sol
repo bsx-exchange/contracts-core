@@ -16,6 +16,7 @@ import {Access} from "contracts/exchange/access/Access.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
+import {TxStatus} from "contracts/exchange/share/Enums.sol";
 
 contract VaultManagerTest is Test {
     using stdStorage for StdStorage;
@@ -242,9 +243,7 @@ contract VaultManagerTest is Test {
         assertEq(vaultManager.vaultCount(staker), 0);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Success
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount, expectedShares, TxStatus.Success);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -290,9 +289,7 @@ contract VaultManagerTest is Test {
 
         // 1. stake 25 ether
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount1, expectedShares1, IExchange.VaultActionStatus.Success
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount1, expectedShares1, TxStatus.Success);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -327,9 +324,7 @@ contract VaultManagerTest is Test {
         );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount2, expectedShares2, IExchange.VaultActionStatus.Success
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount2, expectedShares2, TxStatus.Success);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -370,9 +365,7 @@ contract VaultManagerTest is Test {
         );
 
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount3, expectedShares3, IExchange.VaultActionStatus.Success
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount3, expectedShares3, TxStatus.Success);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -438,9 +431,7 @@ contract VaultManagerTest is Test {
 
         uint256 expectedShares = 0;
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Failure
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount, expectedShares, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -475,7 +466,7 @@ contract VaultManagerTest is Test {
         uint256 expectedShares = 0;
         vm.expectEmit(address(exchange));
         emit IExchange.StakeVault(
-            notVault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Failure
+            notVault, staker, nonce, address(asset), stakeAmount, expectedShares, TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -549,13 +540,7 @@ contract VaultManagerTest is Test {
         uint256 expectedShares = 0;
         vm.expectEmit(address(exchange));
         emit IExchange.StakeVault(
-            vault,
-            staker,
-            nonce,
-            address(collateralToken1),
-            stakeAmount,
-            expectedShares,
-            IExchange.VaultActionStatus.Failure
+            vault, staker, nonce, address(collateralToken1), stakeAmount, expectedShares, TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -593,9 +578,7 @@ contract VaultManagerTest is Test {
 
         uint256 expectedShares = 0;
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Failure
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount, expectedShares, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -634,9 +617,7 @@ contract VaultManagerTest is Test {
 
         uint256 expectedShares = 0;
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Failure
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount, expectedShares, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -681,9 +662,7 @@ contract VaultManagerTest is Test {
         emit IExchange.CoverLoss(vault, staker, address(asset), loss);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, expectedShares, IExchange.VaultActionStatus.Success
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount, expectedShares, TxStatus.Success);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
 
@@ -736,9 +715,7 @@ contract VaultManagerTest is Test {
         vaultManager.stake(vault, staker, address(asset), stakeAmount, nonce, signature);
 
         vm.expectEmit(address(exchange));
-        emit IExchange.StakeVault(
-            vault, staker, nonce, address(asset), stakeAmount, 0, IExchange.VaultActionStatus.Failure
-        );
+        emit IExchange.StakeVault(vault, staker, nonce, address(asset), stakeAmount, 0, TxStatus.Failure);
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
     }
@@ -804,7 +781,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             address(0),
-            IExchange.VaultActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -854,7 +831,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             address(0),
-            IExchange.VaultActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -939,7 +916,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             feeRecipient,
-            IExchange.VaultActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(sequencer);
@@ -1007,7 +984,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             address(0),
-            IExchange.VaultActionStatus.Failure
+            TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1094,15 +1071,7 @@ contract VaultManagerTest is Test {
         uint256 expectedFee = 0;
         vm.expectEmit(address(exchange));
         emit IExchange.UnstakeVault(
-            vault,
-            staker,
-            nonce,
-            invalidToken,
-            unstakeAmount,
-            expectedShares,
-            expectedFee,
-            address(0),
-            IExchange.VaultActionStatus.Failure
+            vault, staker, nonce, invalidToken, unstakeAmount, expectedShares, expectedFee, address(0), TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1156,7 +1125,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             address(0),
-            IExchange.VaultActionStatus.Failure
+            TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1211,7 +1180,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             address(0),
-            IExchange.VaultActionStatus.Failure
+            TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());
@@ -1268,7 +1237,7 @@ contract VaultManagerTest is Test {
             expectedShares,
             expectedFee,
             address(0),
-            IExchange.VaultActionStatus.Failure
+            TxStatus.Failure
         );
         vm.prank(sequencer);
         exchange.processBatch(operation.toArray());

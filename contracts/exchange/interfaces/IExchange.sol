@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {TxStatus} from "../share/Enums.sol";
 import {IClearingService} from "./IClearingService.sol";
 import {ILiquidation} from "./ILiquidation.sol";
 import {IOrderBook} from "./IOrderBook.sol";
@@ -24,7 +25,7 @@ interface IExchange is ILiquidation, ISwap {
     event CreateSubaccount(address indexed main, address indexed subaccount);
 
     /// @notice Emitted when a subaccount is deleted
-    event DeleteSubaccount(address indexed main, address indexed subaccount, ActionStatus status);
+    event DeleteSubaccount(address indexed main, address indexed subaccount, TxStatus status);
 
     /// @dev Emitted when a user deposits tokens to the exchange
     /// @param token Token address
@@ -72,7 +73,7 @@ interface IExchange is ILiquidation, ISwap {
         address signer,
         uint256 nonce,
         int256 amount,
-        ActionStatus status
+        TxStatus status
     );
 
     /// @dev Emitted when a user transfer collateral to BSX1000
@@ -83,12 +84,7 @@ interface IExchange is ILiquidation, ISwap {
     /// @param balance Balance of account after transfer (in 18 decimals)
     /// @param status Transfer status
     event TransferToBSX1000(
-        address indexed token,
-        address indexed user,
-        uint256 nonce,
-        uint256 amount,
-        uint256 balance,
-        TransferToBSX1000Status status
+        address indexed token, address indexed user, uint256 nonce, uint256 amount, uint256 balance, TxStatus status
     );
 
     /// @dev Emitted when referral rebate is paid
@@ -165,7 +161,7 @@ interface IExchange is ILiquidation, ISwap {
         address token,
         uint256 amount,
         uint256 shares,
-        VaultActionStatus status
+        TxStatus status
     );
 
     /// @notice Emitted then user unstakes from vault
@@ -178,23 +174,8 @@ interface IExchange is ILiquidation, ISwap {
         uint256 shares,
         uint256 fee,
         address feeRecipient,
-        VaultActionStatus status
+        TxStatus status
     );
-
-    enum ActionStatus {
-        Success,
-        Failure
-    }
-
-    enum TransferToBSX1000Status {
-        Success,
-        Failure
-    }
-
-    enum VaultActionStatus {
-        Success,
-        Failure
-    }
 
     /// @notice All operation types in the exchange
     enum OperationType {

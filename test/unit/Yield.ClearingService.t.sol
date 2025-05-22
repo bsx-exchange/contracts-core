@@ -20,6 +20,7 @@ import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {UNIVERSAL_SIG_VALIDATOR} from "contracts/exchange/share/Constants.sol";
+import {TxStatus} from "contracts/exchange/share/Enums.sol";
 
 contract YieldClearingServiceTest is Test {
     using stdStorage for StdStorage;
@@ -188,7 +189,7 @@ contract YieldClearingServiceTest is Test {
             address(0),
             0,
             IClearingService.SwapType.DepositVault,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(address(exchange));
@@ -282,7 +283,7 @@ contract YieldClearingServiceTest is Test {
             address(0),
             0,
             IClearingService.SwapType.RedeemVault,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(address(exchange));
@@ -352,7 +353,7 @@ contract YieldClearingServiceTest is Test {
             address(0),
             0,
             IClearingService.SwapType.EarnYieldAsset,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(address(exchange));
@@ -442,7 +443,7 @@ contract YieldClearingServiceTest is Test {
             address(0),
             0,
             IClearingService.SwapType.LiquidateYieldAsset,
-            IClearingService.ActionStatus.Success
+            TxStatus.Success
         );
 
         vm.prank(address(exchange));

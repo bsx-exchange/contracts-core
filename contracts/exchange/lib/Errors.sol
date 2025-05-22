@@ -112,9 +112,6 @@ library Errors {
     /// @notice Thrown when adding signing wallet with used nonce
     error Exchange_AddSigningWallet_UsedNonce(address account, uint64 nonce);
 
-    /// @notice Thrown when setting native yield with used nonce
-    error Exchange_SetNativeYield_NonceUsed(address account, uint256 nonce);
-
     /// @notice Thrown when withdrawing with used nonce
     error Exchange_Withdraw_NonceUsed(address account, uint64 nonce);
 

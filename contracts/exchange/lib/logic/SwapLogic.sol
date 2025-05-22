@@ -16,6 +16,7 @@ import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
 import {Percentage} from "../../lib/Percentage.sol";
 import {MAX_SWAP_FEE_RATE, UNIVERSAL_SIG_VALIDATOR} from "../../share/Constants.sol";
+import {TxStatus} from "../../share/Enums.sol";
 import {GenericLogic} from "./GenericLogic.sol";
 
 library SwapLogic {
@@ -59,7 +60,7 @@ library SwapLogic {
                         amountOutX18,
                         params[i].assetIn,
                         params[i].feeAmount,
-                        ISwap.SwapCollateralStatus.Success
+                        TxStatus.Success
                     );
                 } catch {
                     emit ISwap.SwapCollateral(
@@ -71,7 +72,7 @@ library SwapLogic {
                         0,
                         params[i].assetIn,
                         0,
-                        ISwap.SwapCollateralStatus.Failure
+                        TxStatus.Failure
                     );
                 }
             }

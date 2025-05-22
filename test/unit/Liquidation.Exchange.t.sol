@@ -17,6 +17,7 @@ import {ILiquidation} from "contracts/exchange/interfaces/ILiquidation.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
 import {USDC_TOKEN} from "contracts/exchange/share/Constants.sol";
+import {MultiTxStatus, TxStatus} from "contracts/exchange/share/Enums.sol";
 
 contract LiquidationExchangeTest is Test {
     using stdStorage for StdStorage;
@@ -122,15 +123,9 @@ contract LiquidationExchangeTest is Test {
 
         vm.prank(liquidator);
         vm.expectEmit(address(exchange));
-        emit ILiquidation.LiquidateAccount(user, nonce, ILiquidation.AccountLiquidationStatus.Success);
+        emit ILiquidation.LiquidateAccount(user, nonce, MultiTxStatus.Success);
         emit ILiquidation.LiquidateCollateral(
-            user,
-            nonce,
-            address(liquidationAsset),
-            ILiquidation.CollateralLiquidationStatus.Success,
-            1000 * 1e18,
-            1000 * 500 * 1e18 - fee,
-            fee
+            user, nonce, address(liquidationAsset), TxStatus.Success, 1000 * 1e18, 1000 * 500 * 1e18 - fee, fee
         );
         exchange.liquidateCollateralBatch(params);
 
@@ -165,7 +160,7 @@ contract LiquidationExchangeTest is Test {
 
         vm.prank(liquidator);
         vm.expectEmit(address(exchange));
-        emit ILiquidation.LiquidateAccount(user, nonce, ILiquidation.AccountLiquidationStatus.Failure);
+        emit ILiquidation.LiquidateAccount(user, nonce, MultiTxStatus.Failure);
         exchange.liquidateCollateralBatch(params);
     }
 
@@ -197,7 +192,7 @@ contract LiquidationExchangeTest is Test {
 
         vm.prank(liquidator);
         vm.expectEmit(address(exchange));
-        emit ILiquidation.LiquidateAccount(user, nonce, ILiquidation.AccountLiquidationStatus.Failure);
+        emit ILiquidation.LiquidateAccount(user, nonce, MultiTxStatus.Failure);
         exchange.liquidateCollateralBatch(params);
     }
 
@@ -246,7 +241,7 @@ contract LiquidationExchangeTest is Test {
 
         vm.prank(liquidator);
         vm.expectEmit(address(exchange));
-        emit ILiquidation.LiquidateAccount(user, nonce, ILiquidation.AccountLiquidationStatus.Partial);
+        emit ILiquidation.LiquidateAccount(user, nonce, MultiTxStatus.Partial);
         exchange.liquidateCollateralBatch(params);
     }
 
@@ -348,9 +343,7 @@ contract LiquidationExchangeTest is Test {
 
         vm.prank(address(exchange));
         vm.expectEmit(address(exchange));
-        emit ILiquidation.LiquidateCollateral(
-            user, nonce, liquidationAsset, ILiquidation.CollateralLiquidationStatus.Failure, 0, 0, 0
-        );
+        emit ILiquidation.LiquidateCollateral(user, nonce, liquidationAsset, TxStatus.Failure, 0, 0, 0);
         exchange.innerLiquidation(params);
     }
 

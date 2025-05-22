@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {MultiTxStatus, TxStatus} from "../share/Enums.sol";
+
 /// @title ILiquidation
 /// @notice Interface for collateral asset liquidation operations
 interface ILiquidation {
@@ -24,22 +26,6 @@ interface ILiquidation {
         bytes[] inputs;
     }
 
-    enum AccountLiquidationStatus {
-        // The account liquidation succeeded fully
-        Success,
-        // The account liquidation succeeded partially
-        Partial,
-        // The account liquidation failed
-        Failure
-    }
-
-    enum CollateralLiquidationStatus {
-        // The collateral liquidation succeeded
-        Success,
-        // The collateral liquidation failed
-        Failure
-    }
-
     /// @notice Emitted when a collateral liquidation is attempted
     /// @param account The account whose collateral was involved
     /// @param nonce The unique nonce of the liquidation attempt
@@ -52,7 +38,7 @@ interface ILiquidation {
         address indexed account,
         uint256 indexed nonce,
         address indexed collateral,
-        CollateralLiquidationStatus status,
+        TxStatus status,
         uint256 liquidationAmount,
         uint256 receivedAmount,
         uint256 feeAmount
@@ -62,7 +48,7 @@ interface ILiquidation {
     /// @param account The account whose liquidation was attempted
     /// @param nonce The unique nonce of the liquidation attempt
     /// @param status The result of the liquidation attempt (Success, Partial, Failure)
-    event LiquidateAccount(address indexed account, uint256 indexed nonce, AccountLiquidationStatus status);
+    event LiquidateAccount(address indexed account, uint256 indexed nonce, MultiTxStatus status);
 
     /// @notice Liquidates collateral assets for multiple accounts in a batch
     /// @dev Can only be called by an address with the COLLATERAL_OPERATOR_ROLE
@@ -73,5 +59,5 @@ interface ILiquidation {
     /// @dev Internal function to catch exceptions if fail to liquidate an account
     /// Only called by this contract.
     /// @param params The liquidation parameters for the account
-    function innerLiquidation(LiquidationParams calldata params) external returns (AccountLiquidationStatus status);
+    function innerLiquidation(LiquidationParams calldata params) external returns (MultiTxStatus status);
 }

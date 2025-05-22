@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.23;
 
+import {TxStatus} from "../share/Enums.sol";
+
 /// @title ISwap
 /// @notice Interface for swap operations
 interface ISwap {
-    enum SwapCollateralStatus {
-        // Collateral swap succeeded
-        Success,
-        // Collateral swap failed
-        Failure
-    }
-
     struct SwapParams {
         address account;
         uint256 nonce;
@@ -43,7 +38,7 @@ interface ISwap {
         uint256 amountOut,
         address feeAsset,
         uint256 feeAmount,
-        SwapCollateralStatus status
+        TxStatus status
     );
 
     /// @notice Swap collateral batch

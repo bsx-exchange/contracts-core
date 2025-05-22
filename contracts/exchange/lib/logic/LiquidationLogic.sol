@@ -15,6 +15,7 @@ import {Errors} from "../../lib/Errors.sol";
 import {MathHelper} from "../../lib/MathHelper.sol";
 import {Percentage} from "../../lib/Percentage.sol";
 import {MAX_LIQUIDATION_FEE_RATE} from "../../share/Constants.sol";
+import {MultiTxStatus, TxStatus} from "../../share/Enums.sol";
 import {GenericLogic} from "./GenericLogic.sol";
 
 library LiquidationLogic {
@@ -51,11 +52,11 @@ library LiquidationLogic {
             }
             isLiquidationNonceUsed[account][nonce] = true;
 
-            try exchange.innerLiquidation(params[i]) returns (ILiquidation.AccountLiquidationStatus status) {
+            try exchange.innerLiquidation(params[i]) returns (MultiTxStatus status) {
                 // mark nonce as used
                 emit ILiquidation.LiquidateAccount(account, nonce, status);
             } catch {
-                emit ILiquidation.LiquidateAccount(account, nonce, ILiquidation.AccountLiquidationStatus.Failure);
+                emit ILiquidation.LiquidateAccount(account, nonce, MultiTxStatus.Failure);
             }
         }
     }
@@ -77,7 +78,7 @@ library LiquidationLogic {
         EnumerableSet.AddressSet storage supportedTokens,
         LiquidationEngines calldata engines,
         ILiquidation.LiquidationParams calldata params
-    ) external returns (ILiquidation.AccountLiquidationStatus status) {
+    ) external returns (MultiTxStatus status) {
         address account = params.account;
         address underlyingAsset = engines.orderbook.getCollateralToken();
         uint256 execLen = params.executions.length;
@@ -132,18 +133,12 @@ library LiquidationLogic {
                 engines.clearingService.deposit(account, netAmountOutX18, underlyingAsset);
 
                 emit ILiquidation.LiquidateCollateral(
-                    account,
-                    params.nonce,
-                    liquidationAsset,
-                    ILiquidation.CollateralLiquidationStatus.Success,
-                    amountInX18,
-                    netAmountOutX18,
-                    feeX18
+                    account, params.nonce, liquidationAsset, TxStatus.Success, amountInX18, netAmountOutX18, feeX18
                 );
             } catch {
                 countFailure += 1;
                 emit ILiquidation.LiquidateCollateral(
-                    account, params.nonce, liquidationAsset, ILiquidation.CollateralLiquidationStatus.Failure, 0, 0, 0
+                    account, params.nonce, liquidationAsset, TxStatus.Failure, 0, 0, 0
                 );
             }
 
@@ -152,11 +147,11 @@ library LiquidationLogic {
         }
 
         if (countFailure == 0) {
-            status = ILiquidation.AccountLiquidationStatus.Success;
+            status = MultiTxStatus.Success;
         } else if (countFailure == execLen) {
-            status = ILiquidation.AccountLiquidationStatus.Failure;
+            status = MultiTxStatus.Failure;
         } else {
-            status = ILiquidation.AccountLiquidationStatus.Partial;
+            status = MultiTxStatus.Partial;
         }
     }
 }
