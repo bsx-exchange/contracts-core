@@ -23,4 +23,18 @@ contract ERC20Simple is ERC20 {
     function decimals() public view override returns (uint8) {
         return _decimals;
     }
+
+    function receiveWithAuthorization(
+        address from,
+        address to,
+        uint256 amount,
+        uint256,
+        uint256,
+        bytes32,
+        bytes calldata
+    ) external {
+        address spender = _msgSender();
+        _spendAllowance(from, spender, amount);
+        _transfer(from, to, amount);
+    }
 }
