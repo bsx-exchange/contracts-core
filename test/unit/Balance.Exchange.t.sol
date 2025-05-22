@@ -21,7 +21,6 @@ import {Perp} from "contracts/exchange/Perp.sol";
 import {Spot} from "contracts/exchange/Spot.sol";
 import {VaultManager} from "contracts/exchange/VaultManager.sol";
 import {Access} from "contracts/exchange/access/Access.sol";
-import {IERC3009Minimal} from "contracts/exchange/interfaces/external/IERC3009Minimal.sol";
 import {Errors} from "contracts/exchange/lib/Errors.sol";
 import {MathHelper} from "contracts/exchange/lib/MathHelper.sol";
 import {Roles} from "contracts/exchange/lib/Roles.sol";
@@ -409,7 +408,6 @@ contract BalanceExchangeTest is Test {
     function test_depositWithAuthorization() public {
         address account = makeAddr("account");
         uint128 totalAmount;
-        uint8 tokenDecimals = collateralToken.decimals();
         uint256 mockValidTime = block.timestamp;
         bytes32 mockNonce = keccak256(abi.encode(account, mockValidTime));
         bytes memory mockSignature = abi.encode(account, mockValidTime, mockNonce);
@@ -421,21 +419,6 @@ contract BalanceExchangeTest is Test {
             vm.stopPrank();
 
             totalAmount += amount;
-
-            vm.mockCall(
-                address(collateralToken),
-                abi.encodeWithSelector(
-                    IERC3009Minimal.receiveWithAuthorization.selector,
-                    account,
-                    address(exchange),
-                    amount.convertFrom18D(tokenDecimals),
-                    mockValidTime,
-                    mockValidTime,
-                    mockNonce,
-                    mockSignature
-                ),
-                abi.encode()
-            );
 
             vm.expectEmit(address(exchange));
             emit IExchange.Deposit(address(collateralToken), account, amount, 0);
@@ -467,6 +450,28 @@ contract BalanceExchangeTest is Test {
         address notSupportedToken = makeAddr("notSupportedToken");
         vm.expectRevert(abi.encodeWithSelector(Errors.Exchange_TokenNotSupported.selector, notSupportedToken));
         exchange.depositWithAuthorization(notSupportedToken, makeAddr("account"), 100, 0, 0, 0, "");
+    }
+
+    function test_depositWithAuthorization_revertsIfReceivedAmountMismatch() public {
+        deployCodeTo("WETH9.sol", WETH9);
+
+        vm.prank(sequencer);
+        exchange.addSupportedToken(WETH9);
+
+        uint128 wethExchangeBalance = 500 ether;
+        vm.deal(address(exchange), wethExchangeBalance);
+        vm.prank(address(exchange));
+        WETH9Mock(payable(WETH9)).deposit{value: wethExchangeBalance}();
+
+        address account = makeAddr("account");
+        uint128 amount = 400 ether;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(Errors.Exchange_DepositWithAuthorization_ReceivedAmountMismatch.selector, amount, 0)
+        );
+
+        vm.prank(sequencer);
+        exchange.depositWithAuthorization(WETH9, account, amount, 0, 0, 0, bytes(""));
     }
 
     function test_depositWithAuthorization_revertsIfRecipientIsVault() public {
@@ -681,26 +686,13 @@ contract BalanceExchangeTest is Test {
         uint256 amount = 100e18;
         uint256 mintShares = 50e18;
 
-        collateralToken.mint(address(exchange), uint128(amount).convertFrom18D(collateralToken.decimals()));
-
-        uint8 tokenDecimals = collateralToken.decimals();
         uint256 mockValidTime = block.timestamp;
         bytes32 mockNonce = keccak256(abi.encode(user, mockValidTime));
         bytes memory mockSignature = abi.encode(user, mockValidTime, mockNonce);
-        vm.mockCall(
-            address(collateralToken),
-            abi.encodeWithSelector(
-                IERC3009Minimal.receiveWithAuthorization.selector,
-                user,
-                address(exchange),
-                uint128(amount).convertFrom18D(tokenDecimals),
-                mockValidTime,
-                mockValidTime,
-                mockNonce,
-                mockSignature
-            ),
-            abi.encode()
-        );
+
+        vm.startPrank(user);
+        _prepareDeposit(user, uint128(amount));
+        vm.stopPrank();
 
         vm.expectEmit(address(exchange));
         emit IExchange.Deposit(address(collateralToken), user, amount, 0);
