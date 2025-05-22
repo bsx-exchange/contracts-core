@@ -181,6 +181,69 @@ contract SwapExchangeTest is Test {
         assertEq(exchange.isSwapNonceUsed(user, nonce), true);
     }
 
+    function test_swapCollateralBatch_emitsFailedIfReentrancy() public {
+        tokenIn.mint(user, 1000 * 1e8);
+
+        vm.startPrank(user);
+        tokenIn.approve(address(exchange), 1000 * 1e8);
+        exchange.deposit(address(tokenIn), 1000 ether);
+        vm.stopPrank();
+
+        assertEq(exchange.balanceOf(user, address(tokenIn)), 1000 ether);
+
+        uint256 exchangeTokenInBal = tokenIn.balanceOf(address(exchange));
+        uint256 exchangeTokenOutBal = tokenOut.balanceOf(address(exchange));
+
+        bytes memory commands = abi.encodePacked(bytes4(0)); // trigger reentrancy attack
+        bytes[] memory inputs = new bytes[](1);
+        // mock input
+        uint256 swapAmountIn = 800 * 1e8;
+        uint256 amountOut = 4000 * 1e6;
+        inputs[0] = abi.encode(address(tokenIn), swapAmountIn, address(tokenOut), amountOut);
+
+        uint256 swapAmountInX18 = swapAmountIn.convertToScale(address(tokenIn));
+        uint256 amountOutX18 = amountOut.convertToScale(address(tokenOut));
+        uint256 feeAmountX18 = swapAmountInX18 * 5 / 1000;
+        uint256 amountInX18 = swapAmountInX18 + feeAmountX18;
+        uint256 nonce = 1;
+        bytes memory signature = _signTypedDataHash(
+            userKey,
+            keccak256(
+                abi.encode(SWAP_TYPEHASH, user, address(tokenIn), amountInX18, address(tokenOut), amountOutX18, nonce)
+            )
+        );
+
+        ISwap.SwapParams[] memory params = new ISwap.SwapParams[](1);
+        params[0] = ISwap.SwapParams({
+            account: user,
+            nonce: nonce,
+            assetIn: address(tokenIn),
+            assetOut: address(tokenOut),
+            amountIn: amountInX18,
+            minAmountOut: amountOutX18,
+            feeAmount: feeAmountX18,
+            commands: commands,
+            inputs: inputs,
+            signature: signature
+        });
+
+        vm.expectEmit(address(exchange));
+        emit ISwap.SwapCollateral(
+            user, nonce, address(tokenIn), amountInX18, address(tokenOut), 0, address(tokenIn), 0, TxStatus.Failure
+        );
+
+        vm.prank(sequencer);
+        exchange.swapCollateralBatch(params);
+
+        assertEq(tokenIn.balanceOf(address(exchange)), exchangeTokenInBal);
+        assertEq(tokenOut.balanceOf(address(exchange)), exchangeTokenOutBal);
+
+        assertEq(exchange.balanceOf(user, address(tokenIn)), 1000 ether);
+        assertEq(exchange.balanceOf(user, address(tokenOut)), 0);
+
+        assertEq(exchange.getSequencerFees(address(tokenIn)), 0);
+    }
+
     function test_swapCollateralBatch_emitFailedStatusIfInnerSwapRevert() public {
         tokenIn.mint(user, 1000 * 1e8);
 

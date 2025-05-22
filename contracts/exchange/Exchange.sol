@@ -2,6 +2,7 @@
 pragma solidity ^0.8.23;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -30,7 +31,7 @@ import {MultiTxStatus, TxStatus} from "./share/Enums.sol";
 /// @title Exchange contract
 /// @notice This contract is entry point of the exchange
 /// @dev This contract is upgradeable
-contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchange {
+contract Exchange is Initializable, ReentrancyGuardUpgradeable, EIP712Upgradeable, ExchangeStorage, IExchange {
     using EnumerableSet for EnumerableSet.AddressSet;
     using SafeERC20 for IERC20;
     using MathHelper for uint128;
@@ -99,6 +100,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @inheritdoc IExchange
     function registerVault(address vault, address feeRecipient, uint256 profitShareBps, bytes calldata signature)
         external
+        nonReentrant
         onlyRole(Roles.GENERAL_ROLE)
     {
         if (_accounts[vault].accountType != AccountType.Main) {
@@ -111,28 +113,28 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function depositRaw(address recipient, address token, uint128 rawAmount) external payable {
+    function depositRaw(address recipient, address token, uint128 rawAmount) external payable nonReentrant {
         uint256 amount = token == NATIVE_ETH ? rawAmount : rawAmount.convertToScale(token);
         _deposit(recipient, token, amount, false);
     }
 
     /// @inheritdoc IExchange
-    function deposit(address token, uint128 amount) external payable {
+    function deposit(address token, uint128 amount) external payable nonReentrant {
         _deposit(msg.sender, token, amount, false);
     }
 
     /// @inheritdoc IExchange
-    function deposit(address recipient, address token, uint128 amount) external payable {
+    function deposit(address recipient, address token, uint128 amount) external payable nonReentrant {
         _deposit(recipient, token, amount, false);
     }
 
     /// @inheritdoc IExchange
-    function depositAndEarn(address token, uint128 amount) external {
+    function depositAndEarn(address token, uint128 amount) external nonReentrant {
         _deposit(msg.sender, token, amount, true);
     }
 
     /// @inheritdoc IExchange
-    function depositMaxApproved(address recipient, address token, bool earn) external {
+    function depositMaxApproved(address recipient, address token, bool earn) external nonReentrant {
         uint256 rawAmount = IERC20(token).allowance(msg.sender, address(this));
         uint256 amount = rawAmount.convertToScale(token);
         _deposit(recipient, token, amount, earn);
@@ -147,7 +149,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external {
+    ) external nonReentrant {
         _depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature, false);
     }
 
@@ -160,12 +162,12 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external onlyRole(Roles.GENERAL_ROLE) {
+    ) external onlyRole(Roles.GENERAL_ROLE) nonReentrant {
         _depositWithAuthorization(token, depositor, amount, validAfter, validBefore, nonce, signature, true);
     }
 
     /// @inheritdoc IExchange
-    function depositInsuranceFund(address token, uint256 amount) external onlyRole(Roles.GENERAL_ROLE) {
+    function depositInsuranceFund(address token, uint256 amount) external nonReentrant onlyRole(Roles.GENERAL_ROLE) {
         (uint256 roundDownAmount, uint256 amountToTransfer) = amount.roundDownAndConvertFromScale(token);
         if (roundDownAmount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
@@ -177,7 +179,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function withdrawInsuranceFund(address token, uint256 amount) external onlyRole(Roles.GENERAL_ROLE) {
+    function withdrawInsuranceFund(address token, uint256 amount) external nonReentrant onlyRole(Roles.GENERAL_ROLE) {
         uint256 amountToTransfer = amount.convertFromScale(token);
         if (amount == 0 || amountToTransfer == 0) revert Errors.Exchange_ZeroAmount();
 
@@ -189,17 +191,17 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc IExchange
-    function claimTradingFees() external onlyRole(Roles.GENERAL_ROLE) {
+    function claimTradingFees() external nonReentrant onlyRole(Roles.GENERAL_ROLE) {
         return AdminLogic.claimTradingFees(book, msg.sender, feeRecipientAddress);
     }
 
     /// @inheritdoc IExchange
-    function claimSequencerFees() external onlyRole(Roles.GENERAL_ROLE) {
+    function claimSequencerFees() external nonReentrant onlyRole(Roles.GENERAL_ROLE) {
         return AdminLogic.claimSequencerFees(_collectedFee, this, book, msg.sender, feeRecipientAddress);
     }
 
     /// @inheritdoc IExchange
-    function processBatch(bytes[] calldata operations) external onlyRole(Roles.BATCH_OPERATOR_ROLE) {
+    function processBatch(bytes[] calldata operations) external nonReentrant onlyRole(Roles.BATCH_OPERATOR_ROLE) {
         if (pauseBatchProcess) {
             revert Errors.Exchange_PausedProcessBatch();
         }
@@ -214,6 +216,7 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     /// @inheritdoc ILiquidation
     function liquidateCollateralBatch(LiquidationParams[] calldata params)
         external
+        nonReentrant
         onlyRole(Roles.COLLATERAL_OPERATOR_ROLE)
     {
         return LiquidationLogic.liquidateCollateralBatch(isLiquidationNonceUsed, this, params);
@@ -234,7 +237,11 @@ contract Exchange is Initializable, EIP712Upgradeable, ExchangeStorage, IExchang
     }
 
     /// @inheritdoc ISwap
-    function swapCollateralBatch(SwapParams[] calldata params) external onlyRole(Roles.COLLATERAL_OPERATOR_ROLE) {
+    function swapCollateralBatch(SwapParams[] calldata params)
+        external
+        nonReentrant
+        onlyRole(Roles.COLLATERAL_OPERATOR_ROLE)
+    {
         SwapLogic.swapCollateralBatch(isSwapNonceUsed, this, params);
     }
 

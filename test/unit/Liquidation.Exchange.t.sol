@@ -141,6 +141,50 @@ contract LiquidationExchangeTest is Test {
         assertEq(liquidationAsset.allowance(address(exchange), address(mockUniversalRouter)), 0);
     }
 
+    function test_liquidateCollateralBatch_emitFailedStatusIfReentrancy() public {
+        ERC20Simple liquidationAsset = new ERC20Simple(8);
+        address user = makeAddr("user");
+
+        vm.prank(admin);
+        exchange.addSupportedToken(address(liquidationAsset));
+        liquidationAsset.mint(user, 1000 * 1e8);
+
+        vm.startPrank(user);
+        liquidationAsset.approve(address(exchange), 1000 * 1e8);
+        exchange.deposit(address(liquidationAsset), 1000 * 1e18);
+        vm.stopPrank();
+
+        assertEq(exchange.balanceOf(user, address(liquidationAsset)), 1000 * 1e18);
+        assertEq(liquidationAsset.balanceOf(address(exchange)), 1000 * 1e8);
+
+        // e.g. 1 liquidation asset = 500 underlying asset
+        uint256 liquidationAmount = 1000 * 1e8;
+        uint256 receivedAmount = 1000 * 500 * 1e6;
+
+        bytes memory commands = abi.encodePacked(bytes4(0x00));
+        bytes[] memory inputs = new bytes[](1);
+        // mock input
+        inputs[0] = abi.encode(address(liquidationAsset), liquidationAmount, address(underlyingAsset), receivedAmount);
+
+        ILiquidation.ExecutionParams[] memory executions = new ILiquidation.ExecutionParams[](1);
+        executions[0] = ILiquidation.ExecutionParams({
+            liquidationAsset: address(liquidationAsset),
+            commands: commands,
+            inputs: inputs
+        });
+
+        ILiquidation.LiquidationParams[] memory params = new ILiquidation.LiquidationParams[](1);
+        uint256 nonce = 5;
+        uint16 feePips = 500; // 5%
+        params[0] =
+            ILiquidation.LiquidationParams({account: user, feePips: feePips, nonce: nonce, executions: executions});
+
+        vm.prank(liquidator);
+        vm.expectEmit(address(exchange));
+        emit ILiquidation.LiquidateAccount(user, nonce, MultiTxStatus.Failure);
+        exchange.liquidateCollateralBatch(params);
+    }
+
     function test_liquidateCollateralBatch_emitFailedStatusIfLiquidationRevert() public {
         address invalidToken = makeAddr("invalidToken");
         address user = makeAddr("user");
