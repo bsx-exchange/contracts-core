@@ -87,9 +87,17 @@ library BalanceLogic {
         (amount, rawAmount) = amount.roundDownAndConvertFromScale(token);
         if (amount == 0 || rawAmount == 0) revert Errors.Exchange_ZeroAmount();
 
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+
         IERC3009Minimal(token).receiveWithAuthorization(
             depositor, address(this), rawAmount, validAfter, validBefore, nonce, signature
         );
+
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 receivedAmount = balanceAfter - balanceBefore;
+        if (receivedAmount != rawAmount) {
+            revert Errors.Exchange_DepositWithAuthorization_ReceivedAmountMismatch(rawAmount, receivedAmount);
+        }
 
         engine.clearingService.deposit(depositor, amount, token);
         emit IExchange.Deposit(token, depositor, amount, 0);
