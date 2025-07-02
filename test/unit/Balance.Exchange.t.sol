@@ -240,6 +240,12 @@ contract BalanceExchangeTest is Test {
         exchange.deposit(vault, address(collateralToken), 100);
     }
 
+    function test_deposit_revertsIfSentEth() public {
+        vm.deal(address(exchange), 100 ether);
+        vm.expectRevert(Errors.Exchange_InvalidEthAmount.selector);
+        exchange.deposit{value: 1 ether}(address(collateralToken), 100);
+    }
+
     function test_deposit_withRecipient() public {
         address payer = makeAddr("payer");
         address recipient = makeAddr("recipient");

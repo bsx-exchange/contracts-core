@@ -53,6 +53,7 @@ library BalanceLogic {
             if (msg.value != amount) revert Errors.Exchange_InvalidEthAmount();
             IWETH9(token).deposit{value: amount}();
         } else {
+            if (msg.value != 0) revert Errors.Exchange_InvalidEthAmount();
             (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(token);
             if (roundDownAmount == 0 || rawAmount == 0) revert Errors.Exchange_ZeroAmount();
             amount = roundDownAmount.safeUInt128();
