@@ -14,9 +14,17 @@ contract BsxOracle is Initializable, IBsxOracle {
 
     uint8 public constant SCALE_DECIMALS = 18;
     bytes32 public constant GENERAL_ROLE = keccak256("GENERAL_ROLE");
+    uint256 public constant DEFAULT_STALE_PRICE_THRESHOLD = 1 days;
 
     Access public access;
     mapping(address token => address aggregator) public aggregators;
+    mapping(address token => uint256 stalePriceThreshold) public stalePriceThresholds;
+
+    /// @notice Thrown when the price is not positive
+    error NotPositivePrice();
+
+    /// @notice Thrown when the price is outdated
+    error OutdatedPrice();
 
     modifier onlyRole(bytes32 role) {
         _checkRole(role, msg.sender);
@@ -42,9 +50,20 @@ contract BsxOracle is Initializable, IBsxOracle {
         aggregators[token] = aggregator;
     }
 
+    function setStalePriceThreshold(address token, uint256 stalePriceThreshold) external onlyRole(GENERAL_ROLE) {
+        stalePriceThresholds[token] = stalePriceThreshold;
+    }
+
     function getTokenPriceInUsd(address token) external view override returns (uint256) {
         IChainlinkAggregatorV3 aggregator = IChainlinkAggregatorV3(aggregators[token]);
-        (, int256 price,,,) = aggregator.latestRoundData();
+        (, int256 price,, uint256 updatedAt,) = aggregator.latestRoundData();
+
+        if (price <= 0) revert NotPositivePrice();
+
+        uint256 stalePriceThreshold = stalePriceThresholds[token];
+        if (stalePriceThreshold == 0) stalePriceThreshold = DEFAULT_STALE_PRICE_THRESHOLD;
+        if (block.timestamp - updatedAt > stalePriceThreshold) revert OutdatedPrice();
+
         uint8 decimals = aggregator.decimals();
         return _scalePrice(price.toUint256(), decimals);
     }

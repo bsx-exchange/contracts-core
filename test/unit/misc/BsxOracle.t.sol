@@ -69,6 +69,27 @@ contract BsxOracleTest is Test {
         bsxOracle.setAggregator(token2, aggregator2);
     }
 
+    function test_setStalePriceThreshold_succeed() public {
+        uint256 stalePriceThreshold = 10 minutes;
+
+        vm.prank(sequencer);
+        bsxOracle.setStalePriceThreshold(token, stalePriceThreshold);
+
+        assertEq(bsxOracle.stalePriceThresholds(token), stalePriceThreshold);
+    }
+
+    function test_setStalePriceThreshold_revertIfUnauthorized() public {
+        uint256 stalePriceThreshold = 10 minutes;
+        address anyone = makeAddr("anyone");
+
+        vm.expectRevert(
+            abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, anyone, Roles.GENERAL_ROLE)
+        );
+
+        vm.startPrank(anyone);
+        bsxOracle.setStalePriceThreshold(token, stalePriceThreshold);
+    }
+
     function test_getTokenPriceInUsd_properly() public {
         // aggregator decimals == scale decimals
         uint256 price = 2500;
@@ -76,7 +97,7 @@ contract BsxOracleTest is Test {
         vm.mockCall(
             aggregator,
             abi.encodeWithSelector(IChainlinkAggregatorV3.latestRoundData.selector),
-            abi.encode(0, price * 10 ** decimals, 0, 0, 0)
+            abi.encode(0, price * 10 ** decimals, 0, block.timestamp, 0)
         );
         vm.mockCall(aggregator, abi.encodeWithSelector(IChainlinkAggregatorV3.decimals.selector), abi.encode(decimals));
         assertEq(bsxOracle.getTokenPriceInUsd(token), price * 1e18);
@@ -87,7 +108,7 @@ contract BsxOracleTest is Test {
         vm.mockCall(
             aggregator,
             abi.encodeWithSelector(IChainlinkAggregatorV3.latestRoundData.selector),
-            abi.encode(0, price * 10 ** decimals, 0, 0, 0)
+            abi.encode(0, price * 10 ** decimals, 0, block.timestamp, 0)
         );
         vm.mockCall(aggregator, abi.encodeWithSelector(IChainlinkAggregatorV3.decimals.selector), abi.encode(decimals));
         assertEq(bsxOracle.getTokenPriceInUsd(token), price * 1e18);
@@ -98,7 +119,7 @@ contract BsxOracleTest is Test {
         vm.mockCall(
             aggregator,
             abi.encodeWithSelector(IChainlinkAggregatorV3.latestRoundData.selector),
-            abi.encode(0, price * 10 ** decimals, 0, 0, 0)
+            abi.encode(0, price * 10 ** decimals, 0, block.timestamp, 0)
         );
         vm.mockCall(aggregator, abi.encodeWithSelector(IChainlinkAggregatorV3.decimals.selector), abi.encode(decimals));
         assertEq(bsxOracle.getTokenPriceInUsd(token), price * 1e18);
