@@ -130,7 +130,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
 
     /// @inheritdoc IBSX1000x
     function depositMaxApproved(address account, address token) public {
-        uint256 amount = IERC20(token).allowance(account, address(this));
+        uint256 amount = IERC20(token).allowance(msg.sender, address(this));
         depositRaw(account, token, amount);
     }
 

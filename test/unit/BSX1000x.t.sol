@@ -297,7 +297,7 @@ contract BSX1000xTest is Test {
             totalAmount += amount;
 
             emit IBSX1000x.Deposit(recipient, amount, totalAmount);
-            bsx1000x.depositRaw(recipient, address(collateralToken), rawAmount);
+            bsx1000x.depositMaxApproved(recipient, address(collateralToken));
 
             IBSX1000x.Balance memory balance = bsx1000x.getBalance(recipient);
             assertEq(balance.available, totalAmount);
