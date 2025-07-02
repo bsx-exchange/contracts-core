@@ -2,6 +2,7 @@
 pragma solidity ^0.8.23;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -20,7 +21,7 @@ import {Roles} from "contracts/exchange/lib/Roles.sol";
 
 /// @title BSX1000x contract
 /// @dev This contract is upgradeable.
-contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
+contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable, ReentrancyGuardUpgradeable {
     using EnumerableMap for EnumerableMap.UintToUintMap;
     using SafeERC20 for IERC20;
     using MathHelper for int128;
@@ -99,39 +100,34 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     // }
 
     /// @inheritdoc IBSX1000x
-    function deposit(uint256 amount) public {
-        deposit(msg.sender, amount);
+    function deposit(uint256 amount) public nonReentrant {
+        _deposit(msg.sender, amount);
     }
 
     /// @inheritdoc IBSX1000x
-    function deposit(address account, uint256 amount) public {
-        _assertMainAccount(account);
-
-        (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
-        if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
-
-        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
-
-        uint256 newBalance = _balance[account].available + roundDownAmount;
-        _balance[account].available = newBalance;
-
-        emit Deposit(account, roundDownAmount, newBalance);
+    function deposit(address account, uint256 amount) public nonReentrant {
+        _deposit(account, amount);
     }
 
     /// @inheritdoc IBSX1000x
-    function depositRaw(address account, address token, uint256 rawAmount) public {
+    function depositRaw(address account, address token, uint256 rawAmount) public nonReentrant {
         if (token != address(collateralToken)) {
             revert Errors.Exchange_NotCollateralToken();
         }
 
         uint256 amount = rawAmount.convertToScale(token);
-        deposit(account, amount);
+        _deposit(account, amount);
     }
 
     /// @inheritdoc IBSX1000x
-    function depositMaxApproved(address account, address token) public {
-        uint256 amount = IERC20(token).allowance(msg.sender, address(this));
-        depositRaw(account, token, amount);
+    function depositMaxApproved(address account, address token) public nonReentrant {
+        uint256 rawAmount = IERC20(token).allowance(msg.sender, address(this));
+        if (token != address(collateralToken)) {
+            revert Errors.Exchange_NotCollateralToken();
+        }
+
+        uint256 amount = rawAmount.convertToScale(token);
+        _deposit(account, amount);
     }
 
     /// @inheritdoc IBSX1000x
@@ -142,7 +138,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
         uint256 validBefore,
         bytes32 nonce,
         bytes calldata signature
-    ) external {
+    ) external nonReentrant {
         _assertMainAccount(account);
 
         (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
@@ -170,6 +166,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     function withdraw(address account, uint256 amount, uint256 fee, uint256 nonce, bytes memory signature)
         public
         onlyRole(Roles.BSX1000_OPERATOR_ROLE)
+        nonReentrant
     {
         uint256 netAmount = amount - fee;
         uint256 amountToTransfer = netAmount.convertFromScale(address(collateralToken));
@@ -207,6 +204,7 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     function transferToExchange(address account, uint256 amount, uint256 nonce, bytes memory signature)
         external
         onlyRole(Roles.BSX1000_OPERATOR_ROLE)
+        nonReentrant
     {
         if (isTransferToExchangeNonceUsed[account][nonce]) {
             revert TransferToExchange_UsedNonce(account, nonce);
@@ -249,15 +247,188 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
     }
 
     /// @inheritdoc IBSX1000x
-    function openPosition(Order calldata order, bytes memory signature) external {
-        openPosition(order, 0, signature);
+    function openPosition(Order calldata order, bytes memory signature)
+        external
+        onlyRole(Roles.BSX1000_OPERATOR_ROLE)
+        nonReentrant
+    {
+        _openPosition(order, 0, signature);
     }
 
     /// @inheritdoc IBSX1000x
     function openPosition(Order calldata order, uint256 credit, bytes memory signature)
         public
         onlyRole(Roles.BSX1000_OPERATOR_ROLE)
+        nonReentrant
     {
+        _openPosition(order, credit, signature);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function closePosition(
+        uint32 productId,
+        address account,
+        uint256 nonce,
+        uint128 closePrice,
+        int256 pnl,
+        int256 fee,
+        bytes memory signature
+    ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) nonReentrant {
+        bytes32 closeOrderHash =
+            _hashTypedDataV4(keccak256(abi.encode(CLOSE_POSITION_TYPEHASH, productId, account, nonce)));
+        _validateAuthorization(account, closeOrderHash, signature);
+
+        _closePosition(productId, account, nonce, closePrice, pnl, fee, ClosePositionReason.Normal);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function forceClosePosition(
+        uint32 productId,
+        address account,
+        uint256 nonce,
+        int256 pnl,
+        int256 fee,
+        ClosePositionReason reason
+    ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) nonReentrant {
+        uint128 closePrice;
+        if (reason == ClosePositionReason.Liquidation) {
+            closePrice = _position[account][nonce].liquidationPrice;
+        } else if (reason == ClosePositionReason.TakeProfit) {
+            closePrice = _position[account][nonce].takeProfitPrice;
+        } else {
+            revert InvalidClosePositionReason();
+        }
+
+        _closePosition(productId, account, nonce, closePrice, pnl, fee, reason);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function depositFund(uint256 amount) external nonReentrant {
+        (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
+        if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
+        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
+
+        uint256 newFundBalance = generalFund + roundDownAmount;
+        generalFund = newFundBalance;
+
+        emit DepositFund(roundDownAmount, newFundBalance);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function withdrawFund(uint256 amount) external onlyRole(Roles.GENERAL_ROLE) nonReentrant {
+        if (amount > generalFund) {
+            revert InsufficientFundBalance();
+        }
+
+        uint256 amountToTransfer = amount.convertFromScale(address(collateralToken));
+        if (amount == 0 || amountToTransfer == 0) revert ZeroAmount();
+        collateralToken.safeTransfer(msg.sender, amountToTransfer);
+
+        uint256 newFundBalance = generalFund - amount;
+        generalFund = newFundBalance;
+
+        emit WithdrawFund(amount, newFundBalance);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function openIsolatedFund(uint32 productId) external onlyRole(Roles.GENERAL_ROLE) {
+        if (!_isolatedFunds.contains(productId)) {
+            uint256 initialFund = 0;
+            _isolatedFunds.set(productId, initialFund);
+            emit OpenIsolatedFund(productId);
+        }
+    }
+
+    /// @inheritdoc IBSX1000x
+    function closeIsolatedFund(uint32 productId) external onlyRole(Roles.GENERAL_ROLE) {
+        if (!_isolatedFunds.contains(productId)) {
+            revert IsolatedFundDisabled();
+        }
+
+        uint256 amount = _isolatedFunds.get(productId);
+        generalFund += amount;
+        _isolatedFunds.remove(productId);
+
+        emit CloseIsolatedFund(productId);
+        emit DepositFund(amount, generalFund);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function depositIsolatedFund(uint32 productId, uint256 amount) external nonReentrant {
+        if (!_isolatedFunds.contains(productId)) {
+            revert IsolatedFundDisabled();
+        }
+
+        (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
+        if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
+        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
+
+        uint256 newFundBalance = _isolatedFunds.get(productId) + roundDownAmount;
+        _isolatedFunds.set(productId, newFundBalance);
+
+        emit DepositIsolatedFund(productId, roundDownAmount, newFundBalance);
+    }
+
+    /// @notice Set lock fund factor when opening position
+    function setLockFactor(uint256 factor) external onlyRole(Roles.GENERAL_ROLE) {
+        lockFactor = factor;
+    }
+
+    /// @inheritdoc IBSX1000x
+    function isAuthorizedSigner(address account, address signer) public view returns (bool) {
+        return IExchange(access.getExchange()).isSigningWallet(account, signer);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function getBalance(address account) external view returns (Balance memory) {
+        return _balance[account];
+    }
+
+    /// @inheritdoc IBSX1000x
+    function getPosition(address account, uint256 nonce) external view returns (Position memory) {
+        return _position[account][nonce];
+    }
+
+    /// @inheritdoc IBSX1000x
+    function getIsolatedFund(uint32 productId) external view returns (bool, uint256) {
+        return _isolatedFunds.tryGet(productId);
+    }
+
+    /// @inheritdoc IBSX1000x
+    function getTotalIsolatedFunds() external view returns (uint256 total) {
+        uint256[] memory productIds = _isolatedFunds.keys();
+        uint256 len = productIds.length;
+        for (uint256 i = 0; i < len; i++) {
+            total += _isolatedFunds.get(productIds[i]);
+        }
+    }
+
+    /// @inheritdoc IBSX1000x
+    function getIsolatedProducts() external view returns (uint256[] memory) {
+        return _isolatedFunds.keys();
+    }
+
+    function _assertMainAccount(address account) internal view {
+        if (access.getExchange().getAccountType(account) != IExchange.AccountType.Main) {
+            revert Errors.Exchange_InvalidAccountType(account);
+        }
+    }
+
+    function _deposit(address account, uint256 amount) internal {
+        _assertMainAccount(account);
+
+        (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
+        if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
+
+        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
+
+        uint256 newBalance = _balance[account].available + roundDownAmount;
+        _balance[account].available = newBalance;
+
+        emit Deposit(account, roundDownAmount, newBalance);
+    }
+
+    function _openPosition(Order calldata order, uint256 credit, bytes memory signature) internal {
         _assertMainAccount(order.account);
 
         bytes32 orderHash = _hashTypedDataV4(
@@ -345,156 +516,6 @@ contract BSX1000x is IBSX1000x, Initializable, EIP712Upgradeable {
             order.fee,
             credit
         );
-    }
-
-    /// @inheritdoc IBSX1000x
-    function closePosition(
-        uint32 productId,
-        address account,
-        uint256 nonce,
-        uint128 closePrice,
-        int256 pnl,
-        int256 fee,
-        bytes memory signature
-    ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) {
-        bytes32 closeOrderHash =
-            _hashTypedDataV4(keccak256(abi.encode(CLOSE_POSITION_TYPEHASH, productId, account, nonce)));
-        _validateAuthorization(account, closeOrderHash, signature);
-
-        _closePosition(productId, account, nonce, closePrice, pnl, fee, ClosePositionReason.Normal);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function forceClosePosition(
-        uint32 productId,
-        address account,
-        uint256 nonce,
-        int256 pnl,
-        int256 fee,
-        ClosePositionReason reason
-    ) external onlyRole(Roles.BSX1000_OPERATOR_ROLE) {
-        uint128 closePrice;
-        if (reason == ClosePositionReason.Liquidation) {
-            closePrice = _position[account][nonce].liquidationPrice;
-        } else if (reason == ClosePositionReason.TakeProfit) {
-            closePrice = _position[account][nonce].takeProfitPrice;
-        } else {
-            revert InvalidClosePositionReason();
-        }
-
-        _closePosition(productId, account, nonce, closePrice, pnl, fee, reason);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function depositFund(uint256 amount) external {
-        (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
-        if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
-        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
-
-        uint256 newFundBalance = generalFund + roundDownAmount;
-        generalFund = newFundBalance;
-
-        emit DepositFund(roundDownAmount, newFundBalance);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function withdrawFund(uint256 amount) external onlyRole(Roles.GENERAL_ROLE) {
-        if (amount > generalFund) {
-            revert InsufficientFundBalance();
-        }
-
-        uint256 amountToTransfer = amount.convertFromScale(address(collateralToken));
-        if (amount == 0 || amountToTransfer == 0) revert ZeroAmount();
-        collateralToken.safeTransfer(msg.sender, amountToTransfer);
-
-        uint256 newFundBalance = generalFund - amount;
-        generalFund = newFundBalance;
-
-        emit WithdrawFund(amount, newFundBalance);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function openIsolatedFund(uint32 productId) external onlyRole(Roles.GENERAL_ROLE) {
-        if (!_isolatedFunds.contains(productId)) {
-            uint256 initialFund = 0;
-            _isolatedFunds.set(productId, initialFund);
-            emit OpenIsolatedFund(productId);
-        }
-    }
-
-    /// @inheritdoc IBSX1000x
-    function closeIsolatedFund(uint32 productId) external onlyRole(Roles.GENERAL_ROLE) {
-        if (!_isolatedFunds.contains(productId)) {
-            revert IsolatedFundDisabled();
-        }
-
-        uint256 amount = _isolatedFunds.get(productId);
-        generalFund += amount;
-        _isolatedFunds.remove(productId);
-
-        emit CloseIsolatedFund(productId);
-        emit DepositFund(amount, generalFund);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function depositIsolatedFund(uint32 productId, uint256 amount) external {
-        if (!_isolatedFunds.contains(productId)) {
-            revert IsolatedFundDisabled();
-        }
-
-        (uint256 roundDownAmount, uint256 rawAmount) = amount.roundDownAndConvertFromScale(address(collateralToken));
-        if (roundDownAmount == 0 || rawAmount == 0) revert ZeroAmount();
-        collateralToken.safeTransferFrom(msg.sender, address(this), rawAmount);
-
-        uint256 newFundBalance = _isolatedFunds.get(productId) + roundDownAmount;
-        _isolatedFunds.set(productId, newFundBalance);
-
-        emit DepositIsolatedFund(productId, roundDownAmount, newFundBalance);
-    }
-
-    /// @notice Set lock fund factor when opening position
-    function setLockFactor(uint256 factor) external onlyRole(Roles.GENERAL_ROLE) {
-        lockFactor = factor;
-    }
-
-    /// @inheritdoc IBSX1000x
-    function isAuthorizedSigner(address account, address signer) public view returns (bool) {
-        return IExchange(access.getExchange()).isSigningWallet(account, signer);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function getBalance(address account) external view returns (Balance memory) {
-        return _balance[account];
-    }
-
-    /// @inheritdoc IBSX1000x
-    function getPosition(address account, uint256 nonce) external view returns (Position memory) {
-        return _position[account][nonce];
-    }
-
-    /// @inheritdoc IBSX1000x
-    function getIsolatedFund(uint32 productId) external view returns (bool, uint256) {
-        return _isolatedFunds.tryGet(productId);
-    }
-
-    /// @inheritdoc IBSX1000x
-    function getTotalIsolatedFunds() external view returns (uint256 total) {
-        uint256[] memory productIds = _isolatedFunds.keys();
-        uint256 len = productIds.length;
-        for (uint256 i = 0; i < len; i++) {
-            total += _isolatedFunds.get(productIds[i]);
-        }
-    }
-
-    /// @inheritdoc IBSX1000x
-    function getIsolatedProducts() external view returns (uint256[] memory) {
-        return _isolatedFunds.keys();
-    }
-
-    function _assertMainAccount(address account) internal view {
-        if (access.getExchange().getAccountType(account) != IExchange.AccountType.Main) {
-            revert Errors.Exchange_InvalidAccountType(account);
-        }
     }
 
     function _closePosition(
